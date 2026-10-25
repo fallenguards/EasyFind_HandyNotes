@@ -17,7 +17,7 @@ local NAME_FIELDS = { "label", "name", "title", "text", "desc" }
 
 local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Reputation, C_TooltipInfo, C_Timer, C_AddOns =
       C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Reputation, C_TooltipInfo, C_Timer, C_AddOns
-local IsShiftKeyDown, CreateVector2D = IsShiftKeyDown, CreateVector2D
+local IsShiftKeyDown, CreateVector2D, GetTime = IsShiftKeyDown, CreateVector2D, GetTime
 local sformat, tsort, floor, wipe = string.format, table.sort, math.floor, wipe
 local issecretvalue = issecretvalue or function(_) return false end
 
@@ -123,9 +123,11 @@ local function Render(label)
     return Strip(out), unresolved
 end
 
+local function Get(node, key) return node[key] end
+
 -- A plugin's node may answer a field through a getter that throws.
 local function Field(node, key)
-    local ok, value = pcall(function() return node[key] end)
+    local ok, value = pcall(Get, node, key)
     if ok then return value end
     return nil
 end
@@ -497,13 +499,18 @@ end
 
 -- With nothing typed, the scope lists the pins on the player's map.
 local function Browse(row)
-    local here = C_Map.GetBestMapForUnit("player")
-    if here ~= H.hereID then
-        H.hereID = here
-        local info = here and C_Map.GetMapInfo(here)
-        H.hereParent = info and info.parentMapID or nil
+    -- One map lookup per listing: GetTime holds still within a frame.
+    local now = GetTime()
+    if now ~= H.hereAt then
+        H.hereAt = now
+        local here = C_Map.GetBestMapForUnit("player")
+        if here ~= H.hereID then
+            H.hereID = here
+            local info = here and C_Map.GetMapInfo(here)
+            H.hereParent = info and info.parentMapID or nil
+        end
     end
-    return row.mapID == here or row.mapID == H.hereParent
+    return row.mapID == H.hereID or row.mapID == H.hereParent
 end
 
 -- ==== registration =========================================================
