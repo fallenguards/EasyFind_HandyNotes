@@ -413,6 +413,8 @@ local function SpotKey(e)
     return e.plugin .. "\0" .. e.name .. "\0" .. e.ci .. "\0" .. floor(e.wx / 5) .. "\0" .. floor(e.wy / 5)
 end
 
+local function ByName(a, b) return a.name < b.name end
+
 local function Rows()
     if not H.ready or not HandyNotesOn() then return {} end
     if not H.walked then StartWalk() end
@@ -435,7 +437,7 @@ local function Rows()
             end
         end
     end
-    tsort(out, function(a, b) return a.name < b.name end)
+    tsort(out, ByName)
     return out
 end
 
