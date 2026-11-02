@@ -18,11 +18,18 @@ local RESOLVE_WAIT, RESOLVE_TRIES = 2, 3   -- names the server has not sent yet
 local REWALK_WAIT = 3                      -- after a plugin says its pins changed
 local NAME_FIELDS = { "label", "name", "title", "text", "desc" }
 
-local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Reputation, C_TooltipInfo, C_Timer, C_AddOns =
-      C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Reputation, C_TooltipInfo, C_Timer, C_AddOns
+local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns =
+      C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns
 local IsShiftKeyDown, CreateVector2D, GetTime = IsShiftKeyDown, CreateVector2D, GetTime
 local sformat, tsort, floor, wipe = string.format, table.sort, math.floor, wipe
 local issecretvalue = issecretvalue or function(_) return false end
+-- Era, TBC and Mists: the classic quest title and faction calls, an NPC's
+-- name from a hidden tooltip, no user waypoints or map pin links.
+local QuestTitle = C_QuestLog.GetTitleForQuestID or C_QuestLog.GetQuestInfo
+local RequestQuest = C_QuestLog.RequestLoadQuestByID
+local FactionData = C_Reputation and C_Reputation.GetFactionDataByID
+local TooltipLink = C_TooltipInfo and C_TooltipInfo.GetHyperlink
+local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
 -- Module state: HandyNotes once bound, the map list, the index per
 -- plugin, what to walk again.
@@ -44,12 +51,29 @@ local function Strip(s)
              :gsub("\n", ", "):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local function TooltipTitle(link)
+    if TooltipLink then
+        local data = TooltipLink(link)
+        local line = data and data.lines and data.lines[1]
+        return line and line.leftText
+    end
+    local scan = H.scan
+    if not scan then
+        scan = CreateFrame("GameTooltip", "EasyFindHandyNotesScan", nil, "GameTooltipTemplate")
+        H.scan = scan
+    end
+    scan:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scan:SetHyperlink(link)
+    local line = _G["EasyFindHandyNotesScanTextLeft1"]
+    local text = scan:NumLines() > 0 and line and line:GetText() or nil
+    scan:Hide()
+    return text
+end
+
 local function NpcName(id)
     local name = H.npcs[id]
     if name then return name end
-    local data = C_TooltipInfo.GetHyperlink("unit:Creature-0-0-0-0-" .. id)
-    local line = data and data.lines and data.lines[1]
-    name = line and line.leftText
+    name = TooltipTitle("unit:Creature-0-0-0-0-" .. id)
     if name == nil or issecretvalue(name) then return nil end
     if type(name) ~= "string" or name == "" or name == UNKNOWNOBJECT then return nil end
     H.npcs[id] = name
@@ -81,8 +105,8 @@ local function TokenName(what, id, sub, text)
         return name or text
     end
     if what == "quest" or what == "daily" then
-        local name = C_QuestLog.GetTitleForQuestID(id)
-        if not name then C_QuestLog.RequestLoadQuestByID(id) end
+        local name = QuestTitle(id)
+        if not name and RequestQuest then RequestQuest(id) end
         return name or text
     end
     if what =="spell" then
@@ -99,8 +123,11 @@ local function TokenName(what, id, sub, text)
         return info and info.name or text
     end
     if what =="faction" then
-        local info = C_Reputation.GetFactionDataByID(id)
-        return info and info.name or text
+        if FactionData then
+            local info = FactionData(id)
+            return info and info.name or text
+        end
+        return GetFactionInfoByID and GetFactionInfoByID(id) or text
     end
     if what =="map" then
         local info = C_Map.GetMapInfo(id)
@@ -235,15 +262,19 @@ local function ZoneName(mapID)
     return info and info.name or "?"
 end
 
+-- Every map under both roots: Azeroth's own walk stands where a client
+-- answers no children for the cosmic map.
 local function MapList()
     if H.maps then return H.maps end
     local list, seen = { COSMIC, AZEROTH }, { [COSMIC] = true, [AZEROTH] = true }
-    local kids = C_Map.GetMapChildrenInfo(COSMIC, nil, true)
-    for i = 1, kids and #kids or 0 do
-        local id = kids[i].mapID
-        if not seen[id] then
-            seen[id] = true
-            list[#list + 1] = id
+    for _, root in ipairs({ COSMIC, AZEROTH }) do
+        local kids = C_Map.GetMapChildrenInfo(root, nil, true)
+        for i = 1, kids and #kids or 0 do
+            local id = kids[i].mapID
+            if not seen[id] then
+                seen[id] = true
+                list[#list + 1] = id
+            end
         end
     end
     H.maps = list
@@ -450,14 +481,20 @@ local function Dest(e)
     return { name = e.name, mapID = e.mapID, x = e.x, y = e.y, step = L["STEP_PIN"] }
 end
 
+local function Say(text)
+    print("|cff66ccff" .. L["EXT_NAME"] .. ":|r " .. text)
+end
+
 local function Navigate(dest)
     if API.HasAction("gps", "navigate") then
         API.CallAction("gps", "navigate", dest, { popout = true })
-    elseif C_Map.CanSetUserWaypointOnMap and C_Map.CanSetUserWaypointOnMap(dest.mapID) then
+    elseif not WAYPOINTS then
+        Say(L["NEEDS_GPS"])
+    elseif C_Map.CanSetUserWaypointOnMap(dest.mapID) then
         C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(dest.mapID, dest.x, dest.y))
         C_SuperTrack.SetSuperTrackedUserWaypoint(true)
     else
-        print(sformat(L["NO_PLACE"], dest.name))
+        Say(sformat(L["NO_PLACE"], dest.name))
     end
 end
 
@@ -475,7 +512,7 @@ end
 local function Select(row)
     local e = EntryOf(row)
     if not e then return end
-    if IsShiftKeyDown() then return InsertChatLink(e) end
+    if WAYPOINTS and IsShiftKeyDown() then return InsertChatLink(e) end
     Navigate(Dest(e))
 end
 
@@ -568,7 +605,7 @@ API.RegisterSearchProvider({
     rows = Rows,
     select = Select,
     tooltip = Tooltip,
-    hint = { click = L["HINT_GPS"], shift = L["HINT_LINK"] },
+    hint = { click = L["HINT_GPS"], shift = WAYPOINTS and L["HINT_LINK"] or nil },
     place = Place,
     browse = Browse,
 })
@@ -577,7 +614,7 @@ events:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         events:UnregisterEvent("PLAYER_LOGIN")
         if not Bind() then
-            print("|cff66ccff" .. L["EXT_NAME"] .. ":|r " .. L["NOT_READY"])
+            Say(L["NOT_READY"])
             return
         end
         H.ready = true

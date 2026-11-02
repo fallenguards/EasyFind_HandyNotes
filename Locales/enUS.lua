@@ -21,4 +21,5 @@ L["STEP_PIN"] = "Travel to the pin"
 L["FROM_FMT"] = "%s, %s"
 
 L["NO_PLACE"] = "No known place for %s."
+L["NEEDS_GPS"] = "Directions to a pin need EasyFind's GPS extension."
 L["NOT_READY"] = "HandyNotes' plugin list is not available in this version, so pin search is off."
