@@ -1,7 +1,5 @@
--- HandyNotes' map pins as EasyFind search rows: every plugin's pins found
--- by name, a click asks EasyFind's GPS for directions to the pin. Pins
--- are read at runtime through HandyNotes' plugin interface, the way its
--- own map reads them; nothing of a plugin's is copied.
+-- HandyNotes' map pins as EasyFind rows, read as its own map reads them;
+-- a click asks EasyFind's GPS for directions. Nothing of a plugin's copied.
 local _, ns = ...
 local API = EasyFind and EasyFind.API
 if not (API and API.VERSION == 1) then return end
@@ -33,7 +31,7 @@ local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
 -- Module state: HandyNotes once bound, the map list, the index per
 -- plugin, what to walk again.
-local H = { ready = false, index = {}, lookup = {}, titles = {}, zones = {}, npcs = {}, dirty = {}, all = true, gen = 0 }
+local H = { ready = false, index = {}, lookup = {}, titles = {}, zones = {}, npcs = {}, dirty = {}, all = true, gens = {} }
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -138,9 +136,8 @@ local function TokenName(what, id, sub, text)
     return text
 end
 
--- A label's {kind:id}, {kind:id.sub} and {kind:id:text} tokens become
--- names and {kind:text} keeps its text; the second result says a name is
--- still on its way from the server.
+-- {kind:id}, {kind:id.sub}, {kind:id:text} become names, {kind:text} its text;
+-- also whether a name is still on its way. Nil for a label left empty.
 local function Render(label)
     local unresolved = false
     local out = label:gsub("{(%l+):(%d+)%.?(%d*):?([^{}]*)}", function(what, id, sub, text)
@@ -149,8 +146,8 @@ local function Render(label)
         unresolved = true
         return ""
     end)
-    out = out:gsub("{%l+:([^{}]*)}", "%1")
-    return Strip(out), unresolved
+    out = Strip((out:gsub("{%l+:([^{}]*)}", "%1")))
+    return out ~= "" and out or nil, unresolved
 end
 
 local function Get(node, key) return node[key] end
@@ -165,7 +162,10 @@ end
 -- A pin without a text field, named from the ids it carries.
 local function IdName(node)
     local npc = Field(node, "npc")
-    if type(npc) == "number" then return NpcName(npc), true end
+    if type(npc) == "number" then
+        local name = NpcName(npc)
+        return name, name == nil
+    end
     local achievement, criterion = Field(node, "achievement"), Field(node, "criteria")
     if type(criterion) == "table" then criterion = criterion[1] end
     if type(achievement) == "number" and type(criterion) == "number" then
@@ -178,7 +178,7 @@ local function IdName(node)
     if type(item) == "number" then
         local name = C_Item.GetItemNameByID(item)
         if not name then C_Item.RequestLoadItemDataByID(item) end
-        return name, true
+        return name, name == nil
     end
     if type(achievement) == "number" then
         local name = AchievementName(achievement)
@@ -199,7 +199,8 @@ local function NameOf(node)
         local value = Field(node, NAME_FIELDS[i])
         if type(value) == "string" and value ~= "" then
             if value:find("{", 1, true) then return Render(value) end
-            return Strip(value), false
+            local name = Strip(value)
+            if name ~= "" then return name, false end
         end
     end
     return IdName(node)
@@ -303,7 +304,7 @@ local function Entry(plugin, mapID, coord, node, iconpath)
     if type(iconpath) == "table" then icon = not iconpath.tCoordLeft and iconpath.icon or nil end
     if type(icon) ~= "string" and type(icon) ~= "number" then icon = nil end
     local e = { name = name, plugin = plugin, mapID = mapID, coord = coord, x = x, y = y, node = node,
-                icon = icon, done = IsDone(node), unresolved = unresolved or nil, gen = H.gen }
+                icon = icon, done = IsDone(node), unresolved = unresolved or nil, gen = H.gens[plugin] }
     local continent, pos = C_Map.GetWorldPosFromMapPos(mapID, CreateVector2D(x, y))
     if pos then
         e.ci = continent
@@ -312,9 +313,8 @@ local function Entry(plugin, mapID, coord, node, iconpath)
     return e
 end
 
--- One plugin's pins on one map, through the iterator HandyNotes' own map
--- uses, so the plugin's settings (hidden groups, done pins) apply. The
--- iterator's state leads to the node behind each coord.
+-- One plugin's pins on one map through HandyNotes' own iterator, so its
+-- settings apply; the iterator's state holds the node behind each coord.
 local function WalkMap(plugin, handler, mapID, out)
     local iter, state, init = handler:GetNodes2(mapID, false)
     if type(iter) ~= "function" then return end
@@ -361,19 +361,20 @@ local function Resolve(pending, try)
         local left, added = {}, false
         for i = 1, #pending do
             local e = pending[i]
-            if e.gen == H.gen then
+            if e.gen == H.gens[e.plugin] then
                 local name, unresolved = NameOf(e.node)
-                if name then
+                -- The last try lists a pin under the part of its name known.
+                if name and (not unresolved or try == RESOLVE_TRIES) then
                     e.name, e.unresolved = name, nil
                     Add(e)
                     added = true
-                elseif unresolved then
+                elseif unresolved and try < RESOLVE_TRIES then
                     left[#left + 1] = e
                 end
             end
         end
         if added then Refresh() end
-        if #left > 0 and try < RESOLVE_TRIES then Resolve(left, try + 1) end
+        if #left > 0 then Resolve(left, try + 1) end
     end)
 end
 
@@ -384,10 +385,10 @@ local function Finish(fresh)
         H.index[plugin], H.lookup[plugin] = nil, nil
         for i = 1, #entries do
             local e = entries[i]
-            if e.name then
-                Add(e)
-            elseif e.unresolved then
+            if e.unresolved then
                 pending[#pending + 1] = e
+            elseif e.name then
+                Add(e)
             end
         end
     end
@@ -407,6 +408,7 @@ StartWalk = function()
         elseif (H.all or H.dirty[name]) and type(handler.GetNodes2) == "function" then
             plugins[#plugins + 1] = name
             fresh[name] = {}
+            H.gens[name] = (H.gens[name] or 0) + 1
         end
     end
     H.all = false
@@ -417,7 +419,6 @@ StartWalk = function()
         return
     end
     H.walking = true
-    H.gen = H.gen + 1
     local maps, at = MapList(), 0
     local function Step()
         local stop = math.min(at + MAPS_PER_FRAME, #maps)
@@ -562,7 +563,8 @@ local function Tooltip(row, tt)
     if not (type(render) == "function" and pcall(render, e.node, tt, false)) then
         tt:SetText(e.name)
         local note = Field(e.node, "note") or Field(e.node, "desc")
-        if type(note) == "string" and note ~= "" then tt:AddLine((Render(note)), 1, 1, 1, true) end
+        local text = type(note) == "string" and Render(note)
+        if text then tt:AddLine(text, 1, 1, 1, true) end
     end
     tt:AddLine(sformat("%s  %.1f, %.1f", ZoneName(e.mapID), e.x * 100, e.y * 100), 0.8, 0.8, 0.8)
     tt:AddLine(PluginTitle(e.plugin), 0.6, 0.6, 0.6)
