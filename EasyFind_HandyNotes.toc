@@ -6,7 +6,8 @@
 ## IconTexture: Interface\AddOns\EasyFind\textures\SpyglassMinimap
 ## Group: EasyFind
 ## Category: UI
-## Dependencies: EasyFind, HandyNotes
+## Dependencies: EasyFind
+## OptionalDeps: HandyNotes
 ## SavedVariables: EasyFindHandyNotesDB
 ## DefaultState: enabled
 

@@ -7,6 +7,9 @@ local API = EasyFind and EasyFind.API
 if not (API and API.VERSION == 1) then return end
 
 local L = ns.L
+-- Loaded beside HandyNotes (OptionalDeps), nothing without it.
+local IsAddOnLoaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+if not (IsAddOnLoaded and IsAddOnLoaded("HandyNotes")) then return end
 local KEY = "handynotes"
 local ICON = "Interface\\AddOns\\EasyFind_HandyNotes\\map"
 local COSMIC, AZEROTH = 946, 947
