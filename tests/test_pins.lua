@@ -114,6 +114,46 @@ function T.plugin_title_never_asks_a_missing_addon()
     Eq(#ctx.errors, 0, "errors")
 end
 
+-- ==== found by what and where ================================================
+
+local ELWYNN = 37
+
+function T.rows_carry_their_plugin_and_place_as_words()
+    local rows = Harness.Rows(Load())
+    Eq(table.concat(Row(rows, "Sunken Chest").keywords, ", "), "treasures, durotar, kalimdor", "Durotar's chest")
+    Eq(table.concat(Row(rows, "Ragefire Cache").keywords, ", "), "treasures, orgrimmar, durotar, kalimdor", "a city under its zone")
+end
+
+local function DecorVendors()
+    return Harness.Plugin({
+        [ELWYNN] = { [Coord(0.4, 0.6)] = { title = "Paul North", faction = "alliance" } },
+        [DUROTAR] = { [Coord(0.5, 0.4)] = { title = "Gob Hammerhand" } },
+        [HELLFIRE] = { [Coord(0.3, 0.3)] = { title = "Fel Seller" } },
+    })
+end
+
+function T.place_and_plugin_words_narrow_a_search()
+    local ctx = Load({ plugins = { HandyNotes_DecorVendors = DecorVendors(), Treasures = Treasures() },
+                       optionNames = { HandyNotes_DecorVendors = "Decor Vendors" } })
+    local rows = Harness.Rows(ctx)
+    Eq(Harness.Find(rows, "decor"), "Fel Seller, Gob Hammerhand, Paul North", "every decor vendor")
+    Eq(Harness.Find(rows, "ek decor"), "Paul North", "the Eastern Kingdoms by its initials")
+    Eq(Harness.Find(rows, "decor durotar"), "Gob Hammerhand", "a zone")
+    Eq(Harness.Find(rows, "kalimdor decor"), "Gob Hammerhand", "a continent")
+    Eq(Harness.Find(rows, "durotar"), "Gob Hammerhand, Gruk the Hoarder, Old Crate, Ragefire Cache, Sunken Chest",
+        "everything HandyNotes marks in a zone")
+end
+
+function T.a_nodes_own_kind_is_a_word()
+    local node = { name = "Faruza", category = "primaryProfession", profession = "Herbalism",
+                   description = "Apprentice Herbalist", note = "A long note that is no kind at all, past forty letters." }
+    local ctx = Load({ plugins = { Pin = Harness.Plugin({ [DUROTAR] = { [Coord(0.5, 0.5)] = node } }) } })
+    local row = Row(Harness.Rows(ctx), "Faruza")
+    Eq(table.concat(row.keywords, ", "), "pin, primary profession, herbalism, apprentice herbalist, durotar, kalimdor",
+        "kinds and place; the note left out")
+    True(Harness.Matches(row, "herbalist durotar"), "found by its kind and zone")
+end
+
 -- ==== pins EasyFind lists ====================================================
 
 -- Faruza by name only (a creature of EasyFind's), Grizzlin by name (a

@@ -28,6 +28,9 @@ local REWALK_WAIT = 3                      -- after a plugin says its pins chang
 local LOGIN_WALK_WAIT = 3                  -- after login's own loading
 local NAME_FIELDS = { "label", "name", "title", "text", "desc" }
 local NOTE_FIELDS = { "description", "note", "desc" }
+-- A node's own word for what it is ("auctioneers", "Herbalism", "rare").
+local KIND_FIELDS = { "category", "group", "type", "profession", "description" }
+local KIND_MAX = 40   -- longer text is a note, not a kind
 
 local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns =
       C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns
@@ -44,8 +47,8 @@ local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
 -- Module state: HandyNotes once bound, the map list, per plugin its own
 -- rows and the pins EasyFind lists, what to walk again.
-local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, npcs = {},
-            dirty = {}, all = true, gens = {} }
+local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, placeWords = {},
+            npcs = {}, dirty = {}, all = true, gens = {} }
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -327,6 +330,41 @@ local function SameZone(a, b)
     return za and za == ZoneOf(b) or false
 end
 
+-- "Eastern Kingdoms" -> "ek": a two-word continent's initials.
+local function Initials(name)
+    local out, words = "", 0
+    for word in name:gmatch("[%a\128-\255]+") do
+        out = out .. word:sub(1, 1)
+        words = words + 1
+    end
+    return words >= 2 and out or nil
+end
+
+-- The words that place a pin: its map, every map above it up to its
+-- continent, and the continent's initials ("ek decor", "decor durotar").
+local CONTINENT = Enum and Enum.UIMapType and Enum.UIMapType.Continent or 2
+local function PlaceWords(mapID)
+    local words = H.placeWords[mapID]
+    if words then return words end
+    words = {}
+    local id = mapID
+    for _ = 1, 10 do
+        local info = id and C_Map.GetMapInfo(id)
+        if not info or (info.mapType and info.mapType < CONTINENT) then break end
+        if type(info.name) == "string" and info.name ~= "" then
+            local name = info.name:lower()
+            words[#words + 1] = name
+            if info.mapType == CONTINENT then
+                words[#words + 1] = Initials(name)
+                break
+            end
+        end
+        id = info.parentMapID
+    end
+    H.placeWords[mapID] = words
+    return words
+end
+
 -- Every map under both roots: Azeroth's own walk stands where a client
 -- answers no children for the cosmic map.
 local function MapList()
@@ -561,6 +599,24 @@ end
 
 local function ByName(a, b) return a.name < b.name end
 
+-- What a pin is and where, as words the search matches with its name:
+-- its plugin ("decor vendors"), its own kind, its place.
+local function Keywords(e)
+    if e.keywords then return e.keywords end
+    local words = { PluginTitle(e.plugin):lower() }
+    for i = 1, #KIND_FIELDS do
+        local value = Field(e.node, KIND_FIELDS[i])
+        if type(value) == "string" and value ~= "" and #value <= KIND_MAX and not value:find("{", 1, true) then
+            -- "primaryProfession" -> "primary profession"
+            words[#words + 1] = Strip(value:gsub("(%l)(%u)", "%1 %2")):lower()
+        end
+    end
+    local place = PlaceWords(e.mapID)
+    for i = 1, #place do words[#words + 1] = place[i] end
+    e.keywords = words
+    return words
+end
+
 local function Rows()
     if not H.ready or not HandyNotesOn() then return {} end
     if not H.walked then StartWalk() end
@@ -577,7 +633,7 @@ local function Rows()
                 if not seen[key] then
                     seen[key] = true
                     out[#out + 1] = { name = e.name, icon = e.icon, mapID = e.mapID, coord = e.coord, plugin = plugin,
-                                      searchCommandDesc = sformat(L["PIN_FMT"], ZoneName(e.mapID)) }
+                                      keywords = Keywords(e), searchCommandDesc = sformat(L["PIN_FMT"], ZoneName(e.mapID)) }
                 end
             end
         end

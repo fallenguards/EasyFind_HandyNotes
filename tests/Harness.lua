@@ -96,6 +96,8 @@ local MAPS = {
     [1] = { name = "Durotar", parent = 12, type = 3, at = { 1, 1000, 1000, 1000 } },
     [85] = { name = "Orgrimmar", parent = 1, type = 3, at = { 1, 1200, 1200, 200 } },
     [86] = { name = "Cleft of Shadow", parent = 85, type = 4 },
+    [13] = { name = "Eastern Kingdoms", parent = 947, type = 2, at = { 0, 0, 0, 10000 } },
+    [37] = { name = "Elwynn Forest", parent = 13, type = 3, at = { 0, 3000, 3000, 1000 } },
     [1945] = { name = "Outland", parent = 946, type = 2, at = { 530, 0, 0, 10000 } },
     [100] = { name = "Hellfire Peninsula", parent = 1945, type = 3, at = { 530, 2000, 2000, 1000 } },
 }
@@ -417,6 +419,34 @@ function Harness.Rows(ctx)
     ctx.provider.rows()
     ctx.Advance(0)
     return ctx.provider.rows()
+end
+
+-- EasyFind's rule for a query of several words (Database:ScoreEntryFields):
+-- each word of two letters or more starts a word of the row's name or of
+-- one of its keywords.
+function Harness.Matches(row, query)
+    local words = {}
+    for w in row.name:lower():gmatch("%S+") do words[#words + 1] = w end
+    for _, kw in ipairs(row.keywords or {}) do
+        for w in kw:lower():gmatch("%S+") do words[#words + 1] = w end
+    end
+    for q in query:lower():gmatch("%S+") do
+        if #q >= 2 then
+            local hit = false
+            for _, w in ipairs(words) do hit = hit or w:sub(1, #q) == q end
+            if not hit then return false end
+        end
+    end
+    return true
+end
+
+-- The names of the rows a query finds, in order.
+function Harness.Find(rows, query)
+    local out = {}
+    for _, row in ipairs(rows) do
+        if Harness.Matches(row, query) then out[#out + 1] = row.name end
+    end
+    return table.concat(out, ", ")
 end
 
 -- The row named so, or nil.
