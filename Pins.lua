@@ -1,5 +1,5 @@
--- HandyNotes' map pins as EasyFind rows, read as its own map reads them;
--- a click asks EasyFind's GPS for directions. Nothing of a plugin's copied.
+-- HandyNotes' map pins in EasyFind, read as its own map reads them: a pin
+-- EasyFind lists adds to EasyFind's row, any other is a row of its own.
 local _, ns = ...
 local API = EasyFind and EasyFind.API
 if not (API and API.VERSION == 1) then return end
@@ -8,13 +8,26 @@ local L = ns.L
 -- Loaded beside HandyNotes (OptionalDeps), nothing without it.
 local IsAddOnLoaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
 if not (IsAddOnLoaded and IsAddOnLoaded("HandyNotes")) then return end
+
+-- HasRow and HasCreature (MINOR 6) say which pins EasyFind lists itself.
+if (API.MINOR or 0) < 6 then
+    local notice = CreateFrame("Frame")
+    notice:RegisterEvent("PLAYER_LOGIN")
+    notice:SetScript("OnEvent", function()
+        notice:UnregisterEvent("PLAYER_LOGIN")
+        print("|cff66ccff" .. L["EXT_NAME"] .. ":|r " .. L["NEEDS_NEWER"])
+    end)
+    return
+end
 local KEY = "handynotes"
 local ICON = "Interface\\AddOns\\EasyFind_HandyNotes\\map"
 local COSMIC, AZEROTH = 946, 947
 local MAPS_PER_FRAME = 60
 local RESOLVE_WAIT, RESOLVE_TRIES = 2, 3   -- names the server has not sent yet
 local REWALK_WAIT = 3                      -- after a plugin says its pins changed
+local LOGIN_WALK_WAIT = 3                  -- after login's own loading
 local NAME_FIELDS = { "label", "name", "title", "text", "desc" }
+local NOTE_FIELDS = { "description", "note", "desc" }
 
 local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns =
       C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns
@@ -29,9 +42,10 @@ local FactionData = C_Reputation and C_Reputation.GetFactionDataByID
 local TooltipLink = C_TooltipInfo and C_TooltipInfo.GetHyperlink
 local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
--- Module state: HandyNotes once bound, the map list, the index per
--- plugin, what to walk again.
-local H = { ready = false, index = {}, lookup = {}, titles = {}, zones = {}, npcs = {}, dirty = {}, all = true, gens = {} }
+-- Module state: HandyNotes once bound, the map list, per plugin its own
+-- rows and the pins EasyFind lists, what to walk again.
+local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, npcs = {},
+            dirty = {}, all = true, gens = {} }
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -256,11 +270,23 @@ local function AddonTitle(addon)
     return C_AddOns.DoesAddOnExist(addon) and C_AddOns.GetAddOnMetadata(addon, "Title") or nil
 end
 
+-- The plugin's name in HandyNotes' own options list.
+local function OptionsName(name)
+    local reg = LibStub and LibStub("AceConfigRegistry-3.0", true)
+    if not reg then return nil end
+    -- The first fetch validates every plugin's options table, which may throw.
+    local ok, opts = pcall(reg.GetOptionsTable, reg, "HandyNotes", "dialog", "EasyFind_HandyNotes")
+    local plugins = ok and type(opts) == "table" and type(opts.args) == "table" and opts.args.plugins
+    local entry = type(plugins) == "table" and type(plugins.args) == "table" and plugins.args[name]
+    local text = type(entry) == "table" and entry.name
+    return type(text) == "string" and text ~= "" and text or nil
+end
+
 local function PluginTitle(name)
     local title = H.titles[name]
     if title then return title end
-    title = AddonTitle(name) or AddonTitle("HandyNotes_" .. name)
-    title = title and (Strip(title):gsub("^HandyNotes:%s*", "")) or name
+    title = OptionsName(name) or AddonTitle(name) or AddonTitle("HandyNotes_" .. name)
+    title = title and (Strip(title):gsub("^HandyNotes:%s*", "")) or (name:gsub("^HandyNotes_", ""))
     H.titles[name] = title
     return title
 end
@@ -272,6 +298,33 @@ local function ZoneName(mapID)
     name = info and info.name or "?"
     H.zones[mapID] = name
     return name
+end
+
+-- The zone a map belongs to: itself, or its nearest zone above it (a
+-- city's cellar, a cave). A continent or anything above has none.
+local ZONE = Enum and Enum.UIMapType and Enum.UIMapType.Zone or 3
+local function ZoneOf(mapID)
+    local zone = H.zoneOf[mapID]
+    if zone ~= nil then return zone end
+    zone = false
+    local id = mapID
+    for _ = 1, 10 do
+        local info = id and C_Map.GetMapInfo(id)
+        if not info or (info.mapType and info.mapType < ZONE) then break end
+        if info.mapType == ZONE then
+            zone = id
+            break
+        end
+        id = info.parentMapID
+    end
+    H.zoneOf[mapID] = zone
+    return zone
+end
+
+local function SameZone(a, b)
+    if a == b then return true end
+    local za = ZoneOf(a)
+    return za and za == ZoneOf(b) or false
 end
 
 -- Every map under both roots: Azeroth's own walk stands where a client
@@ -297,14 +350,31 @@ local function EntryKey(mapID, coord)
     return mapID * 100000000 + coord
 end
 
+local function IsTexture(v)
+    return type(v) == "string" or type(v) == "number"
+end
+
+-- The pin's own art: a file, or a cut of one as EasyFind's painter takes it.
+local function PinIcon(iconpath)
+    if IsTexture(iconpath) then return iconpath end
+    if type(iconpath) ~= "table" or not IsTexture(iconpath.icon) then return nil end
+    local l, r, t, b = iconpath.tCoordLeft, iconpath.tCoordRight, iconpath.tCoordTop, iconpath.tCoordBottom
+    if not l then return iconpath.icon end
+    return { file = iconpath.icon, coords = { l, r or 1, t or 0, b or 1 } }
+end
+
+local function NpcID(node)
+    local id = Field(node, "npcID")
+    if type(id) ~= "number" then id = Field(node, "npc") end
+    return type(id) == "number" and id or nil
+end
+
 local function Entry(plugin, mapID, coord, node, iconpath)
     local name, unresolved = NameOf(node)
     local x, y = H.hn:getXY(coord)
-    local icon = iconpath
-    if type(iconpath) == "table" then icon = not iconpath.tCoordLeft and iconpath.icon or nil end
-    if type(icon) ~= "string" and type(icon) ~= "number" then icon = nil end
     local e = { name = name, plugin = plugin, mapID = mapID, coord = coord, x = x, y = y, node = node,
-                icon = icon, done = IsDone(node), unresolved = unresolved or nil, gen = H.gens[plugin] }
+                icon = PinIcon(iconpath), npcID = NpcID(node), done = IsDone(node), unresolved = unresolved or nil,
+                gen = H.gens[plugin] }
     local continent, pos = C_Map.GetWorldPosFromMapPos(mapID, CreateVector2D(x, y))
     if pos then
         e.ci = continent
@@ -341,10 +411,34 @@ local StartWalk
 
 local function Refresh()
     API.RefreshSearchProvider(KEY)
+    API.RefreshRowDecorations()
 end
 
+local function Push(t, key, e)
+    local list = t[key]
+    if list then list[#list + 1] = e else t[key] = { e } end
+end
+
+-- EasyFind's own row for the pin: the creature's id, true for a place.
+local function Listed(e)
+    if e.npcID and API.HasCreature(e.npcID) then return e.npcID end
+    return API.HasRow(e.name, e.mapID)
+end
+
+-- A pin EasyFind lists marks EasyFind's row; any other is a row of ours.
 local function Add(e)
     local plugin = e.plugin
+    local hit = Listed(e)
+    if hit then
+        local decor = H.decor[plugin]
+        if not decor then
+            decor = { byNpc = {}, byName = {} }
+            H.decor[plugin] = decor
+        end
+        if type(hit) == "number" then Push(decor.byNpc, hit, e) end
+        Push(decor.byName, e.name:lower(), e)
+        return
+    end
     local index = H.index[plugin]
     if not index then
         index = {}
@@ -353,6 +447,10 @@ local function Add(e)
     end
     index[#index + 1] = e
     H.lookup[plugin][EntryKey(e.mapID, e.coord)] = e
+end
+
+local function Drop(plugin)
+    H.index[plugin], H.lookup[plugin], H.decor[plugin] = nil, nil, nil
 end
 
 -- Pins whose name had not arrived: asked again a little later.
@@ -382,7 +480,7 @@ local function Finish(fresh)
     H.walking = false
     local pending = {}
     for plugin, entries in pairs(fresh) do
-        H.index[plugin], H.lookup[plugin] = nil, nil
+        Drop(plugin)
         for i = 1, #entries do
             local e = entries[i]
             if e.unresolved then
@@ -404,7 +502,7 @@ StartWalk = function()
     local plugins, fresh = {}, {}
     for name, handler in pairs(HN.plugins) do
         if not PluginShown(name) then
-            H.index[name], H.lookup[name] = nil, nil
+            Drop(name)
         elseif (H.all or H.dirty[name]) and type(handler.GetNodes2) == "function" then
             plugins[#plugins + 1] = name
             fresh[name] = {}
@@ -470,7 +568,6 @@ local function Rows()
     local here = db.nearMe and C_Map.GetBestMapForUnit("player") or nil
     local out, seen = {}, {}
     for plugin, entries in pairs(H.index) do
-        local title = PluginTitle(plugin)
         for i = 1, #entries do
             local e = entries[i]
             local keep = not (db.hideDone and e.done)
@@ -480,7 +577,7 @@ local function Rows()
                 if not seen[key] then
                     seen[key] = true
                     out[#out + 1] = { name = e.name, icon = e.icon, mapID = e.mapID, coord = e.coord, plugin = plugin,
-                                      searchCommandDesc = sformat(L["FROM_FMT"], ZoneName(e.mapID), title) }
+                                      searchCommandDesc = sformat(L["PIN_FMT"], ZoneName(e.mapID)) }
                 end
             end
         end
@@ -489,9 +586,10 @@ local function Rows()
     return out
 end
 
--- The pin's own icon marks the route's end on the map.
+-- The pin's own icon marks the route's end on the map (a whole file only).
 local function Dest(e)
-    return { name = e.name, mapID = e.mapID, x = e.x, y = e.y, step = L["STEP_PIN"], icon = e.icon }
+    return { name = e.name, mapID = e.mapID, x = e.x, y = e.y, step = L["STEP_PIN"],
+             icon = IsTexture(e.icon) and e.icon or nil }
 end
 
 local function Say(text)
@@ -567,8 +665,65 @@ local function Tooltip(row, tt)
         if text then tt:AddLine(text, 1, 1, 1, true) end
     end
     tt:AddLine(sformat("%s  %.1f, %.1f", ZoneName(e.mapID), e.x * 100, e.y * 100), 0.8, 0.8, 0.8)
-    tt:AddLine(PluginTitle(e.plugin), 0.6, 0.6, 0.6)
+    tt:AddLine(sformat(L["PLUGIN_FMT"], L["EXT_NAME"], PluginTitle(e.plugin)), 0.6, 0.6, 0.6)
     return true
+end
+
+-- ==== EasyFind's rows ======================================================
+
+-- The pin behind one of EasyFind's map rows: by the creature's id, else
+-- by name in the row's zone.
+local function DecorEntry(row)
+    if not H.walked then
+        if H.ready then StartWalk() end
+        return nil
+    end
+    local mapID = row.mapID
+    if not mapID or not (row.npcID or row.mapSearchResult) or type(row.name) ~= "string" then return nil end
+    local npcID, name = row.npcID, nil
+    for _, decor in pairs(H.decor) do
+        local list = npcID and decor.byNpc[npcID]
+        if list then return list[1] end
+        name = name or row.name:lower()
+        list = decor.byName[name]
+        for i = 1, list and #list or 0 do
+            if SameZone(list[i].mapID, mapID) then return list[i] end
+        end
+    end
+    return nil
+end
+
+-- Text the row already shows or is found by (its name, subtext, an NPC's
+-- title among its keywords) is nothing HandyNotes adds.
+local function RowKnows(row, text)
+    local low = text:lower()
+    if low == row.name:lower() then return true end
+    local sub = row.searchCommandDesc or row.zoneName
+    if type(sub) == "string" and sub:lower():find(low, 1, true) then return true end
+    local kws = row.keywordsLower or row.keywords
+    for i = 1, type(kws) == "table" and #kws or 0 do
+        if type(kws[i]) == "string" and kws[i]:lower() == low then return true end
+    end
+    return false
+end
+
+-- Only what the pin knows and EasyFind's row does not: its notes, under
+-- the plugin's name. Nothing new, nothing added.
+local function DecorTooltip(row, _, tt)
+    local e = DecorEntry(row)
+    if not e then return end
+    local headed = false
+    for i = 1, #NOTE_FIELDS do
+        local value = Field(e.node, NOTE_FIELDS[i])
+        local text = type(value) == "string" and Render(value)
+        if text and not RowKnows(row, text) then
+            if not headed then
+                tt:AddLine(sformat(L["PLUGIN_FMT"], L["EXT_NAME"], PluginTitle(e.plugin)), 0.4, 0.8, 1)
+                headed = true
+            end
+            tt:AddLine(text, 1, 1, 1, true)
+        end
+    end
 end
 
 -- With nothing typed, the scope lists the pins on the player's map.
@@ -639,6 +794,8 @@ API.RegisterSearchProvider({
     label = L["PROVIDER_LABEL"],
     extension = KEY,
     words = { "pin", "pins", "handynotes" },
+    -- Found by name in any search; @hn only narrows to them.
+    eager = true,
     aliases = { "pins", "handynotes", "hn" },
     options = OPTIONS,
     rows = Rows,
@@ -647,6 +804,32 @@ API.RegisterSearchProvider({
     hint = { click = L["HINT_GPS"], shift = WAYPOINTS and L["HINT_LINK"] or nil },
     place = Place,
     browse = Browse,
+})
+
+-- EasyFind's rows the decorator takes, by the creature's id and by name
+-- on a map (place and service rows carry no id): asked before applies.
+local function Candidates()
+    local npcs, names = {}, {}
+    for _, decor in pairs(H.decor) do
+        for id in pairs(decor.byNpc) do npcs[id] = true end
+        for name, list in pairs(decor.byName) do
+            local maps = names[name] or {}
+            names[name] = maps
+            for i = 1, #list do maps[list[i].mapID] = true end
+        end
+    end
+    return { npcID = npcs, name = names }
+end
+
+-- Its id is the provider's key, so @hn lists both (MINOR 7); before the
+-- name key, candidates by id alone would drop every place row.
+API.RegisterRowDecorator({
+    id = KEY,
+    label = L["EXT_NAME"],
+    applies = function(row) return DecorEntry(row) ~= nil end,
+    tooltip = DecorTooltip,
+    browse = Browse,
+    candidates = API.MINOR >= 7 and Candidates or nil,
 })
 
 events:SetScript("OnEvent", function(_, event)
@@ -661,6 +844,10 @@ events:SetScript("OnEvent", function(_, event)
         hooksecurefunc(H.hn, "UpdatePluginMap", function(_, _, plugin) MarkDirty(plugin) end)
         hooksecurefunc(H.hn, "UpdateWorldMap", function() MarkDirty() end)
         WatchZone()
+        -- Pins known before the first search, and EasyFind's rows marked.
+        C_Timer.After(LOGIN_WALK_WAIT, function()
+            if not H.walked then StartWalk() end
+        end)
     else
         Refresh()
     end

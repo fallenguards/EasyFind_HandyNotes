@@ -1,13 +1,14 @@
 -- Pins.lua against a stand-in HandyNotes: the walk over every map, pin
 -- names from their text or ids (retail and classic calls), HandyNotes'
--- plugin switch, the filters, a click's directions or waypoint, the chat
--- link, the tooltip, the empty scope's list and a plugin's update.
+-- plugin switch, pins EasyFind lists marking its rows instead of their
+-- own, the filters, a click's directions or waypoint, the chat link, the
+-- tooltip, the empty scope's list and a plugin's update.
 local Harness = require("Harness")
 local Eq, True, Coord, Row = Harness.Eq, Harness.True, Harness.Coord, Harness.Row
 
 local T = {}
 
-local DUROTAR, ORGRIMMAR, KALIMDOR, HELLFIRE = 1, 85, 12, 100
+local DUROTAR, ORGRIMMAR, CLEFT, KALIMDOR, HELLFIRE = 1, 85, 86, 12, 100
 
 -- Treasures: three pins in Durotar (one also drawn on Kalimdor), one in
 -- Orgrimmar, one in Hellfire Peninsula.
@@ -44,8 +45,9 @@ function T.rows_are_every_plugins_pins_by_name()
     Eq(Names(rows), "Fel Chest, Gruk the Hoarder, Old Crate, Ragefire Cache, Sunken Chest", "rows")
     local chest = Row(rows, "Sunken Chest")
     Eq(chest.mapID, DUROTAR, "a pin's row is on its own map, not the continent's")
-    Eq(chest.searchCommandDesc, "Durotar, Treasures", "zone and plugin title, the HandyNotes prefix and colors dropped")
+    Eq(chest.searchCommandDesc, "Pin: Durotar", "what it is and its zone")
     Eq(chest.icon, 1001, "the plugin's icon")
+    Eq(ctx.api.asked, 5, "EasyFind asked once per pin")
     Eq(#ctx.errors, 0, "errors")
 end
 
@@ -84,11 +86,173 @@ function T.handynotes_turned_off_shows_no_rows()
     Eq(#Harness.Rows(ctx), 0, "rows")
 end
 
-function T.plugin_title_never_asks_a_missing_addon()
-    local ctx = Load({ addons = {} })
-    local rows = Harness.Rows(ctx)
-    Eq(Row(rows, "Fel Chest").searchCommandDesc, "Hellfire Peninsula, Treasures", "the plugin's own name")
+-- The plugin's name as its row's tooltip names it.
+local function PluginLine(ctx, name)
+    local tt = Harness.Tooltip()
+    ctx.provider.tooltip(Row(Harness.Rows(ctx), name), tt)
+    return tt.lines[#tt.lines]
+end
+
+function T.plugin_title_from_its_addon_with_prefix_and_colors_dropped()
+    Eq(PluginLine(Load(), "Fel Chest"), "HandyNotes: Treasures", "title")
+end
+
+function T.plugin_title_is_its_name_in_handynotes_options_first()
+    local ctx = Load({ optionNames = { Treasures = "Treasure Hunter" } })
+    Eq(PluginLine(ctx, "Fel Chest"), "HandyNotes: Treasure Hunter", "title")
+end
+
+function T.plugin_title_survives_options_that_throw()
+    local ctx = Load({ optionNames = false })
+    Eq(PluginLine(ctx, "Fel Chest"), "HandyNotes: Treasures", "the addon's title")
     Eq(#ctx.errors, 0, "errors")
+end
+
+function T.plugin_title_never_asks_a_missing_addon()
+    local ctx = Load({ addons = {}, plugins = { HandyNotes_NPCs = Treasures() } })
+    Eq(PluginLine(ctx, "Fel Chest"), "HandyNotes: NPCs", "the registered name without its prefix")
+    Eq(#ctx.errors, 0, "errors")
+end
+
+-- ==== pins EasyFind lists ====================================================
+
+-- Faruza by name only (a creature of EasyFind's), Grizzlin by name (a
+-- service place), Gruk by its id, Rattlegore in a cellar of Orgrimmar.
+local function Townsfolk()
+    return Harness.Plugin({
+        [DUROTAR] = {
+            [Coord(0.6, 0.5)] = { name = "Faruza", description = "Apprentice Herbalist" },
+            [Coord(0.7, 0.1)] = { npcID = 3100, name = "Gruk the Hoarder" },
+            [Coord(0.2, 0.2)] = { name = "Sunken Chest" },
+        },
+        [ORGRIMMAR] = { [Coord(0.4, 0.6)] = { name = "Auctioneer Grizzlin", note = "{item:2589:Cloth} buyer" } },
+        [CLEFT] = { [Coord(0.5, 0.5)] = { name = "Rattlegore" } },
+    })
+end
+
+local function Listed(opts)
+    opts = opts or {}
+    opts.plugins = { NPCs = Townsfolk() }
+    local ctx = Load(opts)
+    ctx.listed["faruza@1"] = 3200
+    ctx.listed["auctioneer grizzlin@85"] = true
+    ctx.listed["rattlegore@86"] = true
+    ctx.creatures[3100] = true
+    return ctx
+end
+
+local function Applies(ctx, row)
+    return ctx.decorator.applies(row) == true
+end
+
+function T.pins_easyfind_lists_are_no_rows_of_ours()
+    local ctx = Listed()
+    Eq(Names(Harness.Rows(ctx)), "Sunken Chest", "only the pin EasyFind has no row for")
+end
+
+function T.easyfinds_rows_for_them_carry_handynotes()
+    local ctx = Listed()
+    Harness.Rows(ctx)
+    True(Applies(ctx, { name = "Faruza", category = "npc", npcID = 3200, mapID = DUROTAR, mapSearchResult = true }),
+        "a creature found by name, matched by its id")
+    True(Applies(ctx, { name = "Gruk the Hoarder", category = "npc", npcID = 3100, mapID = KALIMDOR }),
+        "a creature the pin names by id, wherever EasyFind places it")
+    True(Applies(ctx, { name = "Auctioneer Grizzlin", category = "vendor", mapID = ORGRIMMAR, mapSearchResult = true }),
+        "a service place by name in its zone")
+    True(Applies(ctx, { name = "Rattlegore", category = "vendor", mapID = ORGRIMMAR, mapSearchResult = true }),
+        "a pin in a cellar matches the zone above it")
+end
+
+function T.easyfinds_other_rows_are_left_alone()
+    local ctx = Listed()
+    Harness.Rows(ctx)
+    True(not Applies(ctx, { name = "Auctioneer Grizzlin", mapID = HELLFIRE, mapSearchResult = true }), "same name, another zone")
+    True(not Applies(ctx, { name = "Auctioneer Grizzlin", itemID = 2589 }), "an item row")
+    True(not Applies(ctx, { name = "Sunken Chest", mapID = DUROTAR, mapSearchResult = true }), "a pin that is a row of ours")
+    True(not Applies(ctx, { name = "Thrall", npcID = 4949, mapID = ORGRIMMAR }), "a creature no pin names")
+end
+
+local function DecorLines(ctx, row)
+    local tt = Harness.Tooltip()
+    ctx.decorator.tooltip(row, nil, tt)
+    return table.concat(tt.lines, " | ")
+end
+
+-- EasyFind's row already says what and where; it gains only what the
+-- pin knows that the row does not.
+function T.easyfinds_row_gains_no_tag_and_nothing_it_already_knows()
+    local ctx = Listed()
+    Harness.Rows(ctx)
+    Eq(ctx.decorator.subtext, nil, "no subtext of ours")
+    local faruza = { name = "Faruza", category = "npc", npcID = 3200, mapID = DUROTAR, mapSearchResult = true,
+                     keywords = { "Apprentice Herbalist", "herbalism" } }
+    Eq(DecorLines(ctx, faruza), "", "her title is EasyFind's already: no lines")
+end
+
+function T.easyfinds_row_gains_the_pins_own_note()
+    local ctx = Listed()
+    Harness.Rows(ctx)
+    Eq(DecorLines(ctx, { name = "Faruza", npcID = 3200, mapID = DUROTAR, mapSearchResult = true }),
+        "HandyNotes: NPCs | Apprentice Herbalist", "a note the row lacks, under the plugin's name")
+    Eq(DecorLines(ctx, { name = "Auctioneer Grizzlin", mapID = ORGRIMMAR, mapSearchResult = true }),
+        "HandyNotes: NPCs | Cloth buyer", "a note's tokens rendered")
+end
+
+function T.the_first_row_painted_starts_the_walk_and_repaints_after()
+    local ctx = Listed()
+    local row = { name = "Faruza", npcID = 3200, mapID = DUROTAR, mapSearchResult = true }
+    True(not Applies(ctx, row), "nothing known before the walk")
+    local before = ctx.api.repaints
+    ctx.Advance(0)
+    True(ctx.api.repaints > before, "EasyFind's rows repainted once the walk is done")
+    True(Applies(ctx, row), "the row carries HandyNotes then")
+end
+
+-- @hn lists EasyFind's rows the decorator takes beside our own: EasyFind
+-- finds them by these fields before asking applies.
+function T.the_decorator_names_the_rows_it_takes_by_id_and_name()
+    local ctx = Listed()
+    Harness.Rows(ctx)
+    local c = ctx.decorator.candidates()
+    True(c.npcID[3200] and c.npcID[3100], "creatures by id")
+    True(c.name["faruza"][DUROTAR], "a creature by name on its map")
+    True(c.name["auctioneer grizzlin"][ORGRIMMAR], "a service place by name, no id")
+    True(c.name["rattlegore"][CLEFT], "on the cellar's own map; EasyFind matches its zone")
+    Eq(c.name["sunken chest"], nil, "a pin of ours is no candidate")
+end
+
+function T.before_minor_7_no_candidates_drop_the_place_rows()
+    Eq(Load({ apiMinor = 6 }).decorator.candidates, nil, "candidates")
+end
+
+function T.the_empty_scope_lists_easyfinds_rows_on_the_players_map()
+    local ctx = Listed()
+    ctx.world.map = ORGRIMMAR
+    Harness.Rows(ctx)
+    True(ctx.decorator.browse({ name = "Auctioneer Grizzlin", mapID = ORGRIMMAR }), "here")
+    True(not ctx.decorator.browse({ name = "Fel Seller", mapID = HELLFIRE }), "elsewhere")
+end
+
+function T.pins_are_walked_soon_after_login_before_any_search()
+    local ctx = Listed()
+    ctx.Advance(3)
+    True(Applies(ctx, { name = "Faruza", npcID = 3200, mapID = DUROTAR, mapSearchResult = true }), "EasyFind's row marked")
+    local walked = ctx.hn.plugins.NPCs.calls
+    True(walked > 0, "walked")
+    Eq(Names(ctx.provider.rows()), "Sunken Chest", "the first search has the rows")
+    ctx.Advance(10)
+    Eq(ctx.hn.plugins.NPCs.calls, walked, "no second walk")
+end
+
+function T.a_plugins_update_moves_its_pins_out_of_easyfinds_rows()
+    local ctx = Listed()
+    local row = { name = "Faruza", npcID = 3200, mapID = DUROTAR, mapSearchResult = true }
+    Harness.Rows(ctx)
+    True(Applies(ctx, row), "before")
+    ctx.hn.plugins.NPCs.nodes[DUROTAR][Coord(0.6, 0.5)] = nil
+    ctx.hn:UpdatePluginMap("HandyNotes_NotifyUpdate", "NPCs")
+    ctx.Advance(3)
+    True(not Applies(ctx, row), "the removed pin marks nothing")
 end
 
 -- ==== names ==================================================================
@@ -223,6 +387,16 @@ function T.click_asks_the_gps_with_the_pins_icon()
     True(action.opts and action.opts.popout, "in the GPS window")
 end
 
+function T.a_pins_art_cut_from_a_sheet_keeps_its_coords()
+    local cut = { icon = 2002, tCoordLeft = 0.25, tCoordRight = 0.5, tCoordTop = 0, tCoordBottom = 0.25 }
+    local ctx = Load({ gps = true, plugins = OnePin({ label = "Cut", icon = cut }) })
+    local row = Row(Harness.Rows(ctx), "Cut")
+    Eq(row.icon.file, 2002, "the sheet")
+    Eq(table.concat(row.icon.coords, ","), "0.25,0.5,0,0.25", "its cut")
+    ctx.provider.select(row)
+    Eq(ctx.api.actions[1].dest.icon, nil, "no whole sheet at the route's end")
+end
+
 function T.place_is_where_the_click_goes()
     local ctx = Load()
     local dest = ctx.provider.place(Row(Harness.Rows(ctx), "Fel Chest"))
@@ -286,7 +460,7 @@ function T.tooltip_shows_name_note_place_and_plugin()
     local ctx = Load()
     local tt = Harness.Tooltip()
     True(ctx.provider.tooltip(Row(Harness.Rows(ctx), "Sunken Chest"), tt), "shown")
-    Eq(table.concat(tt.lines, " | "), "Sunken Chest | Under the pier. | Durotar  50.0, 50.0 | Treasures", "lines")
+    Eq(table.concat(tt.lines, " | "), "Sunken Chest | Under the pier. | Durotar  50.0, 50.0 | HandyNotes: Treasures", "lines")
 end
 
 function T.tooltip_uses_the_plugins_own_render()

@@ -43,8 +43,8 @@ function Harness.Toc()
     return fields, files
 end
 
--- EasyFind 4.1.0's field types (Core/API.lua, MINOR 5): anything else
--- passed is an unknown field, a wrong type a load error there.
+-- EasyFind's field types (Core/API.lua, MINOR 6): anything else passed is
+-- an unknown field, a wrong type a load error there.
 Harness.EXTENSION_FIELDS = {
     id = "string", name = "string", description = "string", icon = "texture", iconCoords = "table",
     addon = "string", loadInCombat = "boolean", loadAtLogin = "boolean", open = "function", close = "function",
@@ -58,6 +58,12 @@ Harness.PROVIDER_FIELDS = {
     aliases = "table", options = "table", rows = "function", select = "function", tooltip = "function",
     leave = "function", extension = "string", loadOnSearch = "any", hint = "any", browse = "function",
     place = "function", places = "function", link = "table", menu = "function",
+}
+Harness.DECORATOR_FIELDS = {
+    id = "string", extension = "string", slot = "string", label = "string", applies = "function",
+    categories = "table", text = "function", tooltip = "function", menu = "function", submenu = "boolean",
+    subtext = "function", select = "function", hint = "function", keep = "function", sortKey = "function",
+    aliases = "table", browse = "function", candidates = "function",
 }
 
 -- Unknown fields and wrong types in a registration, as one string.
@@ -79,17 +85,19 @@ end
 
 -- ==== the world ==============================================================
 
--- Maps: Cosmic over Azeroth over Kalimdor over Durotar and Orgrimmar, and
--- Outland beside Azeroth. A map's spot in its continent's yards:
--- { continent, left, top, size }.
+-- Maps: Cosmic over Azeroth over Kalimdor over Durotar and Orgrimmar (its
+-- Cleft of Shadow below it), and Outland beside Azeroth. A map's spot in
+-- its continent's yards: { continent, left, top, size }; type as the
+-- client's (0 cosmic, 1 world, 2 continent, 3 zone, 4 dungeon).
 local MAPS = {
-    [946] = { name = "Cosmic" },
-    [947] = { name = "Azeroth", parent = 946 },
-    [12] = { name = "Kalimdor", parent = 947, at = { 1, 0, 0, 10000 } },
-    [1] = { name = "Durotar", parent = 12, at = { 1, 1000, 1000, 1000 } },
-    [85] = { name = "Orgrimmar", parent = 1, at = { 1, 1200, 1200, 200 } },
-    [1945] = { name = "Outland", parent = 946, at = { 530, 0, 0, 10000 } },
-    [100] = { name = "Hellfire Peninsula", parent = 1945, at = { 530, 2000, 2000, 1000 } },
+    [946] = { name = "Cosmic", type = 0 },
+    [947] = { name = "Azeroth", parent = 946, type = 1 },
+    [12] = { name = "Kalimdor", parent = 947, type = 2, at = { 1, 0, 0, 10000 } },
+    [1] = { name = "Durotar", parent = 12, type = 3, at = { 1, 1000, 1000, 1000 } },
+    [85] = { name = "Orgrimmar", parent = 1, type = 3, at = { 1, 1200, 1200, 200 } },
+    [86] = { name = "Cleft of Shadow", parent = 85, type = 4 },
+    [1945] = { name = "Outland", parent = 946, type = 2, at = { 530, 0, 0, 10000 } },
+    [100] = { name = "Hellfire Peninsula", parent = 1945, type = 3, at = { 530, 2000, 2000, 1000 } },
 }
 Harness.MAPS = MAPS
 
@@ -170,6 +178,7 @@ local function Game(ctx, client)
         ctx.printed[#ctx.printed + 1] = table.concat(parts, " ")
     end
     env.UNKNOWNOBJECT = "Unknown"
+    env.Enum = { UIMapType = { Zone = 3 } }
     env.WorldFrame = {}
     env.WorldMapFrame = NewFrame(ctx, "Frame", "WorldMapFrame")
     env.WorldMapFrame.shown = false
@@ -177,7 +186,7 @@ local function Game(ctx, client)
     env.C_Map = {
         GetMapInfo = function(id)
             local m = MAPS[id]
-            return m and { mapID = id, name = m.name, parentMapID = m.parent } or nil
+            return m and { mapID = id, name = m.name, parentMapID = m.parent, mapType = m.type } or nil
         end,
         GetMapChildrenInfo = function(id, _, all)
             if id == 946 and w.noCosmicChildren then return {} end
@@ -240,12 +249,21 @@ end
 
 -- ==== EasyFind and HandyNotes ================================================
 
+-- EasyFind's own rows: ctx.listed["name@mapID"] = npcID or true (its map
+-- search's rows), ctx.creatures[npcID] = true (its creature catalog).
 local function FakeAPI(ctx, opts)
     local rec = ctx.api
-    local API = { VERSION = opts.apiVersion or 1, MINOR = opts.apiMinor or 5 }
+    local API = { VERSION = opts.apiVersion or 1, MINOR = opts.apiMinor or 7 }
     function API.RegisterExtension(def) rec.extension = def return true end
     function API.RegisterSearchProvider(def) rec.provider = def return true end
+    function API.RegisterRowDecorator(def) rec.decorator = def return true end
     function API.RefreshSearchProvider(key) rec.refreshes[#rec.refreshes + 1] = key end
+    function API.RefreshRowDecorations() rec.repaints = rec.repaints + 1 end
+    function API.HasRow(name, mapID)
+        rec.asked = rec.asked + 1
+        return ctx.listed[name:lower() .. "@" .. mapID] or false
+    end
+    function API.HasCreature(npcID) return ctx.creatures[npcID] == true end
     function API.HasAction(id, name) return id == "gps" and name == "navigate" and ctx.world.gps end
     function API.CallAction(id, name, dest, o)
         rec.actions[#rec.actions + 1] = { id = id, name = name, dest = dest, opts = o }
@@ -293,6 +311,23 @@ function Harness.Coord(x, y)
     return math.floor(x * 10000 + 0.5) * 10000 + math.floor(y * 10000 + 0.5)
 end
 
+-- HandyNotes' options as AceConfigRegistry hands them out: names maps a
+-- plugin to its name there; a names of false makes the fetch throw.
+local function FakeLibStub(names)
+    local reg = {}
+    function reg:GetOptionsTable(app)
+        if names == false then error("a plugin's options table is malformed") end
+        if app ~= "HandyNotes" then return nil end
+        local plugins = {}
+        for plugin, name in pairs(names) do plugins[plugin] = { type = "group", name = name } end
+        return { args = { plugins = { args = plugins } } }
+    end
+    return function(lib, silent)
+        if lib == "AceConfigRegistry-3.0" then return reg end
+        assert(silent, "no library " .. lib)
+    end
+end
+
 local function FakeHandyNotes(ctx)
     local HN = { plugins = {}, enabled = true, notified = 0 }
     HN.db = { profile = { enabledPlugins = setmetatable({}, { __index = function() return true end }) } }
@@ -311,12 +346,14 @@ end
 -- installed), easyfind = false (no EasyFind), apiVersion, apiMinor,
 -- handynotes = false (not loaded), bare = true (loaded without its plugin
 -- list), login = false (stop before PLAYER_LOGIN), plugins = { name =
--- handler }, addons = { folder = { Title = ... } }, db (saved settings).
+-- handler }, addons = { folder = { Title = ... } }, optionNames = { plugin =
+-- its name in HandyNotes' options } (false: the fetch throws), db (saved
+-- settings).
 function Harness.Load(opts)
     opts = opts or {}
     local ctx = {
         now = 0, timers = {}, frames = {}, printed = {}, errors = {}, linked = {}, waypoints = {}, requested = {},
-        api = { refreshes = {}, actions = {} },
+        api = { refreshes = {}, actions = {}, repaints = 0, asked = 0 }, listed = {}, creatures = {},
         world = { map = 1, shift = false, gps = opts.gps == true },
         npcs = {}, items = {}, spells = {}, quests = {}, questsDone = {}, factions = {}, currencies = {},
         achievements = {}, criteria = {}, loaded = {}, addons = {},
@@ -336,6 +373,7 @@ function Harness.Load(opts)
         ctx.hn = HN
     end
     for folder, meta in pairs(opts.addons or {}) do ctx.addons[folder] = meta end
+    if opts.optionNames ~= nil then env.LibStub = FakeLibStub(opts.optionNames) end
     env.EasyFindHandyNotesDB = opts.db
 
     local ns = {}
@@ -345,7 +383,7 @@ function Harness.Load(opts)
         chunk("EasyFind_HandyNotes", ns)
     end
     ctx.ns, ctx.L = ns, ns.L
-    ctx.extension, ctx.provider = ctx.api.extension, ctx.api.provider
+    ctx.extension, ctx.provider, ctx.decorator = ctx.api.extension, ctx.api.provider, ctx.api.decorator
     if opts.login ~= false then ctx.Fire("PLAYER_LOGIN") end
     return ctx
 end

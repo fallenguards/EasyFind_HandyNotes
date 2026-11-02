@@ -1,4 +1,4 @@
--- The addon loaded offline: what it registers with EasyFind 4.1.0's API,
+-- The addon loaded offline: what it registers with EasyFind's API (MINOR 6),
 -- and that it stays silent or says why when EasyFind or HandyNotes is
 -- missing, too old or incomplete.
 local Harness = require("Harness")
@@ -53,6 +53,34 @@ function T.registers_the_provider_with_known_fields()
     for _, o in ipairs(p.options) do
         True(type(o.label) == "string" and type(o.get) == "function" and type(o.set) == "function", "option " .. tostring(o.label))
     end
+end
+
+-- A pin is found by typing its name: never only behind @hn, a pin word or
+-- the filter.
+function T.pins_are_searched_from_the_first_keystroke()
+    local p = Harness.Load().provider
+    Eq(p.eager, true, "eager")
+    Eq(p.lazy, nil, "lazy")
+end
+
+function T.registers_the_row_decorator_with_known_fields()
+    local ctx = Harness.Load()
+    local d = ctx.decorator
+    True(d ~= nil, "the decorator is registered")
+    Eq(Harness.FieldErrors(d, Harness.DECORATOR_FIELDS), "", "decorator fields")
+    Eq(d.id, "handynotes", "under its extension")
+    for _, fn in ipairs({ "applies", "tooltip" }) do Eq(type(d[fn]), "function", fn) end
+end
+
+function T.an_easyfind_without_hasrow_registers_nothing_and_says_why()
+    local ctx = Harness.Load({ apiMinor = 5 })
+    Eq(ctx.extension, nil, "extension")
+    Eq(ctx.provider, nil, "provider")
+    Eq(ctx.decorator, nil, "decorator")
+    Eq(#ctx.printed, 1, "lines in chat")
+    True(ctx.printed[1]:find(ctx.L["NEEDS_NEWER"], 1, true) ~= nil, "says EasyFind needs an update")
+    ctx.Fire("PLAYER_LOGIN")
+    Eq(#ctx.printed, 1, "once")
 end
 
 function T.no_easyfind_loads_nothing_and_says_nothing()
