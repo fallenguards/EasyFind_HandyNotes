@@ -33,7 +33,7 @@ local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
 -- Module state: HandyNotes once bound, the map list, the index per
 -- plugin, what to walk again.
-local H = { ready = false, index = {}, lookup = {}, titles = {}, npcs = {}, dirty = {}, all = true, gen = 0 }
+local H = { ready = false, index = {}, lookup = {}, titles = {}, zones = {}, npcs = {}, dirty = {}, all = true, gen = 0 }
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -228,7 +228,7 @@ end
 local function Bind()
     local HN = _G.HandyNotes
     if type(HN) ~= "table" or type(HN.plugins) ~= "table" or type(HN.getXY) ~= "function"
-       or type(HN.UpdatePluginMap) ~= "function" then
+       or type(HN.UpdatePluginMap) ~= "function" or type(HN.UpdateWorldMap) ~= "function" then
         return false
     end
     H.hn = HN
@@ -241,25 +241,36 @@ local function HandyNotesOn()
     return HN:IsEnabled() == true
 end
 
--- The player's own switch for the plugin in HandyNotes' options.
+-- The player's own switch for the plugin in HandyNotes' options, read as
+-- its map reads it (a default of on for every plugin).
 local function PluginShown(name)
     local profile = H.hn.db and H.hn.db.profile
     local enabled = profile and profile.enabledPlugins
-    return not enabled or enabled[name] ~= false
+    return not enabled or enabled[name] == true
+end
+
+-- A plugin registers under a name of its own, its folder often under
+-- another; metadata for a missing addon is never asked.
+local function AddonTitle(addon)
+    return C_AddOns.DoesAddOnExist(addon) and C_AddOns.GetAddOnMetadata(addon, "Title") or nil
 end
 
 local function PluginTitle(name)
     local title = H.titles[name]
     if title then return title end
-    title = C_AddOns.GetAddOnMetadata(name, "Title") or C_AddOns.GetAddOnMetadata("HandyNotes_" .. name, "Title")
+    title = AddonTitle(name) or AddonTitle("HandyNotes_" .. name)
     title = title and (Strip(title):gsub("^HandyNotes:%s*", "")) or name
     H.titles[name] = title
     return title
 end
 
 local function ZoneName(mapID)
+    local name = H.zones[mapID]
+    if name then return name end
     local info = C_Map.GetMapInfo(mapID)
-    return info and info.name or "?"
+    name = info and info.name or "?"
+    H.zones[mapID] = name
+    return name
 end
 
 -- Every map under both roots: Azeroth's own walk stands where a client
@@ -486,14 +497,33 @@ local function Say(text)
     print("|cff66ccff" .. L["EXT_NAME"] .. ":|r " .. text)
 end
 
+-- The game's waypoint where the GPS is not installed. Set under an open
+-- world map it is rebuilt in our name, so it waits for the map to close.
+local function SetWaypoint(dest)
+    local map = WorldMapFrame
+    if map and map:IsShown() then
+        if not H.waitHooked then
+            H.waitHooked = true
+            map:HookScript("OnHide", function()
+                local wait = H.waypointWait
+                H.waypointWait = nil
+                if wait then SetWaypoint(wait) end
+            end)
+        end
+        H.waypointWait = dest
+        return
+    end
+    C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(dest.mapID, dest.x, dest.y))
+    C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+end
+
 local function Navigate(dest)
     if API.HasAction("gps", "navigate") then
         API.CallAction("gps", "navigate", dest, { popout = true })
     elseif not WAYPOINTS then
         Say(L["NEEDS_GPS"])
     elseif C_Map.CanSetUserWaypointOnMap(dest.mapID) then
-        C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(dest.mapID, dest.x, dest.y))
-        C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+        SetWaypoint(dest)
     else
         Say(sformat(L["NO_PLACE"], dest.name))
     end
@@ -501,7 +531,8 @@ end
 
 -- The game's own map pin link, as a pin's "Link to chat" sends it.
 local function InsertChatLink(e)
-    local link = sformat("|cffffff00|Hworldmap:%d:%d:%d|h[%s]|h|r", e.mapID, e.x * 10000, e.y * 10000, MAP_PIN_HYPERLINK)
+    local link = sformat("|cffffff00|Hworldmap:%d:%d:%d|h[%s]|h|r", e.mapID, floor(e.x * 10000 + 0.5),
+        floor(e.y * 10000 + 0.5), MAP_PIN_HYPERLINK or e.name)
     local active = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow()
     if active and active:IsShown() then
         active:Insert(link)
