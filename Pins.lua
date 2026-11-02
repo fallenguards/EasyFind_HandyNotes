@@ -477,8 +477,9 @@ local function Rows()
     return out
 end
 
+-- The pin's own icon marks the route's end on the map.
 local function Dest(e)
-    return { name = e.name, mapID = e.mapID, x = e.x, y = e.y, step = L["STEP_PIN"] }
+    return { name = e.name, mapID = e.mapID, x = e.x, y = e.y, step = L["STEP_PIN"], icon = e.icon }
 end
 
 local function Say(text)
@@ -592,6 +593,11 @@ API.RegisterExtension({
             box:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, i == 1 and -8 or -4)
             below = box
         end
+    end,
+    resetSettings = function()
+        wipe(DB())
+        WatchZone()
+        Refresh()
     end,
 })
 
