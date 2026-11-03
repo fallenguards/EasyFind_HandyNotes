@@ -5,6 +5,6 @@
 - Find what your HandyNotes plugins mark on the map from EasyFind's search bar: treasures, rares, vendors and more, by name and with no `@` needed.
 - Search by what a pin is, what it drops or where it is: "decor durotar", "ek decor", or an item's name to find the rare that drops it.
 - A pin EasyFind already lists shows once, as EasyFind's own result, with the plugin's note and loot in its tooltip.
-- Click a pin for directions with EasyFind's GPS; without the GPS, retail puts the game's map waypoint on it, and Shift-click links the spot in chat.
+- Click a pin for directions with the [EasyFind: GPS Navigation Extension](https://www.curseforge.com/wow/addons/easyfind-gps-navigation-extension); without it, retail puts the game's map waypoint on the pin. Shift-click links the spot in chat on retail.
 - `@hn` lists the pins on your map; the filter menu can hide done pins or keep only your map's.
 - Retail and WoW Forever.

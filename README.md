@@ -1,6 +1,6 @@
 # EasyFind: HandyNotes Extension
 
-Find what your HandyNotes plugins mark on the map from EasyFind's search bar: treasures, rares, vendors and more, and get directions there.
+Find what your HandyNotes plugins mark on the map from EasyFind's search bar: treasures, rares, vendors and more. With the [EasyFind: GPS Navigation Extension](https://www.curseforge.com/wow/addons/easyfind-gps-navigation-extension), get directions there.
 
 ## Requirements
 
@@ -15,6 +15,7 @@ Retail and WoW Forever.
 - Search by what a pin is, what it drops or where it is: "decor durotar" lists the decor vendors in Durotar, "ek decor" those in the Eastern Kingdoms, and an item's name finds the rare that drops it.
 - A pin EasyFind already lists (an NPC, a vendor, a flight master) shows once, as EasyFind's own result, with the plugin's note and loot in its tooltip.
 - A pin of its own shows its zone; hover it for the plugin's tooltip, its loot, the coordinates and the plugin's name.
-- Click a pin for directions with EasyFind's GPS. Without the GPS, retail puts the game's map waypoint on it; Shift-click links the spot in chat.
+- Click a pin for directions with the [EasyFind: GPS Navigation Extension](https://www.curseforge.com/wow/addons/easyfind-gps-navigation-extension). Without it, retail puts the game's map waypoint on the pin.
+- Shift-click links the pin's spot in chat (retail).
 - `@hn` lists the pins on your map, with the results EasyFind has for them.
 - The filter menu can hide pins a plugin marks done and keep only the pins on your map.
