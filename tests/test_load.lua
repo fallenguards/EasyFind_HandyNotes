@@ -14,13 +14,13 @@ function T.toc_loads_beside_handynotes_and_requires_only_easyfind()
     Eq(fields.RequiredDeps, nil, "RequiredDeps")
 end
 
--- HandyNotes' own clients: retail, Mists, TBC Anniversary, Era.
+-- HandyNotes' own clients: retail, Mists, TBC Anniversary, WoW Forever
+-- (from HandyNotes 1.6.32), Era.
 function T.toc_lists_every_client_handynotes_runs_on()
     local fields = Harness.Toc()
     local listed = {}
     for n in fields.Interface:gmatch("%d+") do listed[tonumber(n)] = true end
-    for _, n in ipairs({ 120105, 50504, 20506, 11509 }) do True(listed[n], "Interface lists " .. n) end
-    True(not listed[16001], "no WoW Forever: HandyNotes does not list it")
+    for _, n in ipairs({ 120105, 50504, 20506, 16001, 11509 }) do True(listed[n], "Interface lists " .. n) end
 end
 
 function T.toc_files_all_exist()

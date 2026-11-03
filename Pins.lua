@@ -176,6 +176,32 @@ local function Field(node, key)
     return nil
 end
 
+-- A loot entry: an item id, or a table holding it ({ id }, { 1234, mount = ... }).
+local function LootItem(entry)
+    if type(entry) == "table" then entry = entry.id or entry[1] end
+    return type(entry) == "number" and entry or nil
+end
+
+local function ItemName(id)
+    local name = C_Item.GetItemNameByID(id)
+    if not name then C_Item.RequestLoadItemDataByID(id) end
+    return name
+end
+
+-- The names of what the pin drops, as far as the client knows them; true
+-- second when one is still on its way.
+local function LootNames(node)
+    local loot = Field(node, "loot")
+    if type(loot) ~= "table" then return nil, false end
+    local names, missing = {}, false
+    for i = 1, #loot do
+        local id = LootItem(loot[i])
+        local name = id and ItemName(id)
+        if name then names[#names + 1] = name elseif id then missing = true end
+    end
+    return names, missing
+end
+
 -- A pin without a text field, named from the ids it carries.
 local function IdName(node)
     local npc = Field(node, "npc")
@@ -190,11 +216,9 @@ local function IdName(node)
         if name then return name, false end
     end
     local loot = Field(node, "loot")
-    local first = type(loot) == "table" and loot[1]
-    local item = type(first) == "table" and first.id or first
-    if type(item) == "number" then
-        local name = C_Item.GetItemNameByID(item)
-        if not name then C_Item.RequestLoadItemDataByID(item) end
+    local item = type(loot) == "table" and LootItem(loot[1])
+    if item then
+        local name = ItemName(item)
         return name, name == nil
     end
     if type(achievement) == "number" then
@@ -599,11 +623,14 @@ end
 
 local function ByName(a, b) return a.name < b.name end
 
--- What a pin is and where, as words the search matches with its name:
--- its plugin ("decor vendors"), its own kind, its place.
+-- What a pin is, where and what it drops, as words the search matches
+-- with its name: its plugin ("decor vendors"), its own kind, its loot,
+-- its place. Built again while a loot name is still on its way.
 local function Keywords(e)
     if e.keywords then return e.keywords end
     local words = { PluginTitle(e.plugin):lower() }
+    local loot, missing = LootNames(e.node)
+    for i = 1, loot and #loot or 0 do words[#words + 1] = loot[i]:lower() end
     for i = 1, #KIND_FIELDS do
         local value = Field(e.node, KIND_FIELDS[i])
         if type(value) == "string" and value ~= "" and #value <= KIND_MAX and not value:find("{", 1, true) then
@@ -613,8 +640,17 @@ local function Keywords(e)
     end
     local place = PlaceWords(e.mapID)
     for i = 1, #place do words[#words + 1] = place[i] end
-    e.keywords = words
+    if not missing then e.keywords = words end
     return words
+end
+
+-- What the pin drops, under one heading.
+local function AddLoot(tt, node)
+    local loot = LootNames(node)
+    if not loot or #loot == 0 then return false end
+    tt:AddLine(L["LOOT"], 1, 0.82, 0)
+    for i = 1, #loot do tt:AddLine(loot[i], 1, 1, 1) end
+    return true
 end
 
 local function Rows()
@@ -719,6 +755,7 @@ local function Tooltip(row, tt)
         local note = Field(e.node, "note") or Field(e.node, "desc")
         local text = type(note) == "string" and Render(note)
         if text then tt:AddLine(text, 1, 1, 1, true) end
+        AddLoot(tt, e.node)
     end
     tt:AddLine(sformat("%s  %.1f, %.1f", ZoneName(e.mapID), e.x * 100, e.y * 100), 0.8, 0.8, 0.8)
     tt:AddLine(sformat(L["PLUGIN_FMT"], L["EXT_NAME"], PluginTitle(e.plugin)), 0.6, 0.6, 0.6)
@@ -763,23 +800,22 @@ local function RowKnows(row, text)
     return false
 end
 
--- Only what the pin knows and EasyFind's row does not: its notes, under
--- the plugin's name. Nothing new, nothing added.
+-- Only what the pin knows and EasyFind's row does not: its notes and its
+-- loot, under the plugin's name. Nothing new, nothing added.
 local function DecorTooltip(row, _, tt)
     local e = DecorEntry(row)
     if not e then return end
-    local headed = false
+    local notes = {}
     for i = 1, #NOTE_FIELDS do
         local value = Field(e.node, NOTE_FIELDS[i])
         local text = type(value) == "string" and Render(value)
-        if text and not RowKnows(row, text) then
-            if not headed then
-                tt:AddLine(sformat(L["PLUGIN_FMT"], L["EXT_NAME"], PluginTitle(e.plugin)), 0.4, 0.8, 1)
-                headed = true
-            end
-            tt:AddLine(text, 1, 1, 1, true)
-        end
+        if text and not RowKnows(row, text) then notes[#notes + 1] = text end
     end
+    local loot = LootNames(e.node)
+    if #notes == 0 and not (loot and #loot > 0) then return end
+    tt:AddLine(sformat(L["PLUGIN_FMT"], L["EXT_NAME"], PluginTitle(e.plugin)), 0.4, 0.8, 1)
+    for i = 1, #notes do tt:AddLine(notes[i], 1, 1, 1, true) end
+    AddLoot(tt, e.node)
 end
 
 -- With nothing typed, the scope lists the pins on the player's map.

@@ -154,6 +154,40 @@ function T.a_nodes_own_kind_is_a_word()
     True(Harness.Matches(row, "herbalist durotar"), "found by its kind and zone")
 end
 
+-- A rare in the shape of the Forever plugin's: its name in a token with
+-- its own text, its loot as ids or tables holding one.
+local function Pexmit()
+    return { Rares = Harness.Plugin({ [DUROTAR] = { [Coord(0.5, 0.5)] = {
+        label = "{npc:266901:Pexmit}", loot = { 251468, { 252877, mount = 1 } } } } }) }
+end
+
+function T.a_rare_is_found_by_what_it_drops()
+    local ctx = Load({ plugins = Pexmit() })
+    ctx.items[251468], ctx.items[252877] = "Plans: Bold Dirk", "Pattern: Tooled Leather Armor"
+    local rows = Harness.Rows(ctx)
+    Eq(Harness.Find(rows, "bold dirk"), "Pexmit", "an item it drops")
+    Eq(Harness.Find(rows, "tooled leather durotar"), "Pexmit", "with its zone")
+end
+
+function T.a_rares_tooltip_lists_its_loot()
+    local ctx = Load({ plugins = Pexmit() })
+    ctx.items[251468], ctx.items[252877] = "Plans: Bold Dirk", "Pattern: Tooled Leather Armor"
+    local tt = Harness.Tooltip()
+    ctx.provider.tooltip(Row(Harness.Rows(ctx), "Pexmit"), tt)
+    Eq(table.concat(tt.lines, " | "),
+        "Pexmit | Loot | Plans: Bold Dirk | Pattern: Tooled Leather Armor | Durotar  50.0, 50.0 | HandyNotes: Rares", "lines")
+end
+
+function T.loot_named_later_joins_the_words_on_the_next_build()
+    local ctx = Load({ plugins = Pexmit() })
+    ctx.items[251468] = "Plans: Bold Dirk"
+    local rows = Harness.Rows(ctx)
+    Eq(Harness.Find(rows, "tooled"), "", "not known yet")
+    True(ctx.requested[#ctx.requested] == "item 252877", "asked for")
+    ctx.items[252877] = "Pattern: Tooled Leather Armor"
+    Eq(Harness.Find(ctx.provider.rows(), "tooled"), "Pexmit", "found once the client knows it")
+end
+
 -- ==== pins EasyFind lists ====================================================
 
 -- Faruza by name only (a creature of EasyFind's), Grizzlin by name (a
@@ -227,6 +261,15 @@ function T.easyfinds_row_gains_no_tag_and_nothing_it_already_knows()
     local faruza = { name = "Faruza", category = "npc", npcID = 3200, mapID = DUROTAR, mapSearchResult = true,
                      keywords = { "Apprentice Herbalist", "herbalism" } }
     Eq(DecorLines(ctx, faruza), "", "her title is EasyFind's already: no lines")
+end
+
+function T.easyfinds_row_gains_the_pins_loot()
+    local ctx = Load({ plugins = Pexmit() })
+    ctx.listed["pexmit@1"] = 266901
+    ctx.items[251468], ctx.items[252877] = "Plans: Bold Dirk", "Pattern: Tooled Leather Armor"
+    Harness.Rows(ctx)
+    Eq(DecorLines(ctx, { name = "Pexmit", npcID = 266901, mapID = DUROTAR, mapSearchResult = true }),
+        "HandyNotes: Rares | Loot | Plans: Bold Dirk | Pattern: Tooled Leather Armor", "what it drops")
 end
 
 function T.easyfinds_row_gains_the_pins_own_note()

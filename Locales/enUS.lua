@@ -20,6 +20,7 @@ L["HINT_LINK"] = "Link in chat"
 L["STEP_PIN"] = "Travel to the pin"
 L["PIN_FMT"] = "Pin: %s"
 L["PLUGIN_FMT"] = "%s: %s"
+L["LOOT"] = "Loot"
 
 L["NO_PLACE"] = "No known place for %s."
 L["NEEDS_NEWER"] = "This EasyFind is too old for HandyNotes' pins: update EasyFind to search them."
