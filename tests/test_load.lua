@@ -14,13 +14,15 @@ function T.toc_loads_beside_handynotes_and_requires_only_easyfind()
     Eq(fields.RequiredDeps, nil, "RequiredDeps")
 end
 
--- HandyNotes' own clients: retail, Mists, TBC Anniversary, WoW Forever
--- (from HandyNotes 1.6.32), Era.
-function T.toc_lists_every_client_handynotes_runs_on()
+-- Retail and WoW Forever (HandyNotes runs there from 1.6.32). The classic
+-- clients have nothing of HandyNotes' that EasyFind does not list itself,
+-- so the toc (and the CurseForge tags it makes) leaves them out.
+function T.toc_lists_retail_and_forever()
     local fields = Harness.Toc()
     local listed = {}
     for n in fields.Interface:gmatch("%d+") do listed[tonumber(n)] = true end
-    for _, n in ipairs({ 120105, 50504, 20506, 16001, 11509 }) do True(listed[n], "Interface lists " .. n) end
+    for _, n in ipairs({ 120105, 16001 }) do True(listed[n], "Interface lists " .. n) end
+    for _, n in ipairs({ 50504, 20506, 11509 }) do True(not listed[n], "no classic client " .. n) end
 end
 
 function T.toc_files_all_exist()
