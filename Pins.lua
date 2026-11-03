@@ -9,8 +9,9 @@ local L = ns.L
 local IsAddOnLoaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
 if not (IsAddOnLoaded and IsAddOnLoaded("HandyNotes")) then return end
 
--- HasRow and HasCreature (MINOR 6) say which pins EasyFind lists itself.
-if (API.MINOR or 0) < 6 then
+-- HasRow and HasCreature say which pins EasyFind lists itself; MINOR 7
+-- lets its marked rows share @hn and our words, and places our rows.
+if (API.MINOR or 0) < 7 then
     local notice = CreateFrame("Frame")
     notice:RegisterEvent("PLAYER_LOGIN")
     notice:SetScript("OnEvent", function()
@@ -47,8 +48,8 @@ local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
 
 -- Module state: HandyNotes once bound, the map list, per plugin its own
 -- rows and the pins EasyFind lists, what to walk again.
-local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, placeWords = {},
-            npcs = {}, dirty = {}, all = true, gens = {} }
+local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, npcs = {},
+            dirty = {}, all = true, gens = {} }
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -354,40 +355,6 @@ local function SameZone(a, b)
     return za and za == ZoneOf(b) or false
 end
 
--- "Eastern Kingdoms" -> "ek": a two-word continent's initials.
-local function Initials(name)
-    local out, words = "", 0
-    for word in name:gmatch("[%a\128-\255]+") do
-        out = out .. word:sub(1, 1)
-        words = words + 1
-    end
-    return words >= 2 and out or nil
-end
-
--- The words that place a pin: its map, every map above it up to its
--- continent, and the continent's initials ("ek decor", "decor durotar").
-local CONTINENT = Enum and Enum.UIMapType and Enum.UIMapType.Continent or 2
-local function PlaceWords(mapID)
-    local words = H.placeWords[mapID]
-    if words then return words end
-    words = {}
-    local id = mapID
-    for _ = 1, 10 do
-        local info = id and C_Map.GetMapInfo(id)
-        if not info or (info.mapType and info.mapType < CONTINENT) then break end
-        if type(info.name) == "string" and info.name ~= "" then
-            local name = info.name:lower()
-            words[#words + 1] = name
-            if info.mapType == CONTINENT then
-                words[#words + 1] = Initials(name)
-                break
-            end
-        end
-        id = info.parentMapID
-    end
-    H.placeWords[mapID] = words
-    return words
-end
 
 -- Every map under both roots: Azeroth's own walk stands where a client
 -- answers no children for the cosmic map.
@@ -484,7 +451,7 @@ end
 -- EasyFind's own row for the pin: the creature's id, true for a place.
 local function Listed(e)
     if e.npcID and API.HasCreature(e.npcID) then return e.npcID end
-    return API.HasRow(e.name, e.mapID)
+    return e.name ~= nil and API.HasRow(e.name, e.mapID)
 end
 
 -- A pin EasyFind lists marks EasyFind's row; any other is a row of ours.
@@ -497,8 +464,11 @@ local function Add(e)
             decor = { byNpc = {}, byName = {} }
             H.decor[plugin] = decor
         end
-        if type(hit) == "number" then Push(decor.byNpc, hit, e) end
-        Push(decor.byName, e.name:lower(), e)
+        if type(hit) == "number" then
+            e.rowNpc = hit
+            Push(decor.byNpc, hit, e)
+        end
+        if e.name then Push(decor.byName, e.name:lower(), e) end
         return
     end
     local index = H.index[plugin]
@@ -545,7 +515,10 @@ local function Finish(fresh)
         Drop(plugin)
         for i = 1, #entries do
             local e = entries[i]
-            if e.unresolved then
+            -- A creature EasyFind has needs no name of ours: its row has one.
+            if e.npcID and API.HasCreature(e.npcID) then
+                Add(e)
+            elseif e.unresolved then
                 pending[#pending + 1] = e
             elseif e.name then
                 Add(e)
@@ -623,9 +596,9 @@ end
 
 local function ByName(a, b) return a.name < b.name end
 
--- What a pin is, where and what it drops, as words the search matches
--- with its name: its plugin ("decor vendors"), its own kind, its loot,
--- its place. Built again while a loot name is still on its way.
+-- What a pin is and drops, as words the search matches with its name:
+-- its plugin ("decor vendors"), its own kind, its loot. EasyFind adds its
+-- place's words (MINOR 7). Built again while a loot name is on its way.
 local function Keywords(e)
     if e.keywords then return e.keywords end
     local words = { PluginTitle(e.plugin):lower() }
@@ -638,8 +611,6 @@ local function Keywords(e)
             words[#words + 1] = Strip(value:gsub("(%l)(%u)", "%1 %2")):lower()
         end
     end
-    local place = PlaceWords(e.mapID)
-    for i = 1, #place do words[#words + 1] = place[i] end
     if not missing then e.keywords = words end
     return words
 end
@@ -913,15 +884,48 @@ local function Candidates()
     return { npcID = npcs, name = names }
 end
 
--- Its id is the provider's key, so @hn lists both (MINOR 7); before the
--- name key, candidates by id alone would drop every place row.
+local function Merge(into, words)
+    for i = 1, #words do
+        local seen = false
+        for j = 1, #into do seen = seen or into[j] == words[i] end
+        if not seen then into[#into + 1] = words[i] end
+    end
+end
+
+-- The pins' own words on the EasyFind rows they mark ("decor" finds the
+-- decor vendors EasyFind lists): a creature by its id, a place by name@map.
+local function Words()
+    local npc, name = {}, {}
+    for _, decor in pairs(H.decor) do
+        for id, list in pairs(decor.byNpc) do
+            local into = npc[id] or {}
+            npc[id] = into
+            for i = 1, #list do Merge(into, Keywords(list[i])) end
+        end
+        for _, list in pairs(decor.byName) do
+            for i = 1, #list do
+                local e = list[i]
+                if not e.rowNpc then
+                    local key = e.name:lower() .. "@" .. e.mapID
+                    local into = name[key] or {}
+                    name[key] = into
+                    Merge(into, Keywords(e))
+                end
+            end
+        end
+    end
+    return { npc = npc, name = name }
+end
+
+-- Its id is the provider's key, so @hn lists both.
 API.RegisterRowDecorator({
     id = KEY,
     label = L["EXT_NAME"],
     applies = function(row) return DecorEntry(row) ~= nil end,
     tooltip = DecorTooltip,
     browse = Browse,
-    candidates = API.MINOR >= 7 and Candidates or nil,
+    candidates = Candidates,
+    words = Words,
 })
 
 events:SetScript("OnEvent", function(_, event)

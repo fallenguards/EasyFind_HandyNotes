@@ -118,10 +118,11 @@ end
 
 local ELWYNN = 37
 
-function T.rows_carry_their_plugin_and_place_as_words()
-    local rows = Harness.Rows(Load())
-    Eq(table.concat(Row(rows, "Sunken Chest").keywords, ", "), "treasures, durotar, kalimdor", "Durotar's chest")
-    Eq(table.concat(Row(rows, "Ragefire Cache").keywords, ", "), "treasures, orgrimmar, durotar, kalimdor", "a city under its zone")
+-- Its place's words are EasyFind's (any row with a numeric mapID).
+function T.rows_carry_their_plugin_as_words_and_their_map()
+    local chest = Row(Harness.Rows(Load()), "Sunken Chest")
+    Eq(table.concat(chest.keywords, ", "), "treasures", "words")
+    Eq(type(chest.mapID), "number", "a mapID EasyFind places it by")
 end
 
 local function DecorVendors()
@@ -149,8 +150,8 @@ function T.a_nodes_own_kind_is_a_word()
                    description = "Apprentice Herbalist", note = "A long note that is no kind at all, past forty letters." }
     local ctx = Load({ plugins = { Pin = Harness.Plugin({ [DUROTAR] = { [Coord(0.5, 0.5)] = node } }) } })
     local row = Row(Harness.Rows(ctx), "Faruza")
-    Eq(table.concat(row.keywords, ", "), "pin, primary profession, herbalism, apprentice herbalist, durotar, kalimdor",
-        "kinds and place; the note left out")
+    Eq(table.concat(row.keywords, ", "), "pin, primary profession, herbalism, apprentice herbalist",
+        "its kinds; the note left out")
     True(Harness.Matches(row, "herbalist durotar"), "found by its kind and zone")
 end
 
@@ -304,8 +305,32 @@ function T.the_decorator_names_the_rows_it_takes_by_id_and_name()
     Eq(c.name["sunken chest"], nil, "a pin of ours is no candidate")
 end
 
-function T.before_minor_7_no_candidates_drop_the_place_rows()
-    Eq(Load({ apiMinor = 6 }).decorator.candidates, nil, "candidates")
+-- "decor" finds the decor vendors EasyFind lists: the pins' words on the
+-- rows they mark, a creature by id, a place by name@map.
+function T.easyfinds_rows_take_the_pins_words()
+    local ctx = Listed({ optionNames = { NPCs = "Townsfolk" } })
+    Harness.Rows(ctx)
+    local w = ctx.decorator.words()
+    Eq(table.concat(w.npc[3200], ", "), "townsfolk, apprentice herbalist", "Faruza by her id")
+    Eq(table.concat(w.npc[3100], ", "), "townsfolk", "Gruk by his")
+    Eq(table.concat(w.name["auctioneer grizzlin@85"], ", "), "townsfolk", "a place by name on its map")
+    True(w.name["rattlegore@86"] ~= nil, "on its own map; EasyFind matches the zone")
+    Eq(w.name["sunken chest@1"], nil, "a pin of ours keeps its words on its own row")
+    local faruza = { name = "Faruza", npcID = 3200, mapID = DUROTAR, keywords = w.npc[3200] }
+    True(Harness.Matches(faruza, "townsfolk durotar"), "found by the plugin and her zone")
+end
+
+-- A rare pin with only its creature's id (the client may never send our
+-- tooltip scan its name): EasyFind's row has the name, so it marks it.
+function T.a_pin_of_only_a_creature_id_marks_easyfinds_row_without_a_name()
+    local ctx = Load({ plugins = { Rares = Harness.Plugin({ [DUROTAR] = { [Coord(0.4, 0.4)] = { npc = 9999 } } }) } })
+    ctx.creatures[9999] = true
+    Eq(#Harness.Rows(ctx), 0, "no row of ours")
+    ctx.Advance(10)
+    True(Applies(ctx, { name = "Grizzleback", npcID = 9999, mapID = DUROTAR }), "EasyFind's row marked")
+    True(ctx.decorator.candidates().npcID[9999], "named for @hn")
+    Eq(table.concat(ctx.decorator.words().npc[9999], ", "), "rares", "its words")
+    Eq(#ctx.provider.rows(), 0, "still no row of ours once the tries are done")
 end
 
 function T.the_empty_scope_lists_easyfinds_rows_on_the_players_map()

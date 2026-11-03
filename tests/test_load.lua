@@ -1,4 +1,4 @@
--- The addon loaded offline: what it registers with EasyFind's API (MINOR 6),
+-- The addon loaded offline: what it registers with EasyFind's API (MINOR 7),
 -- and that it stays silent or says why when EasyFind or HandyNotes is
 -- missing, too old or incomplete.
 local Harness = require("Harness")
@@ -72,8 +72,8 @@ function T.registers_the_row_decorator_with_known_fields()
     for _, fn in ipairs({ "applies", "tooltip" }) do Eq(type(d[fn]), "function", fn) end
 end
 
-function T.an_easyfind_without_hasrow_registers_nothing_and_says_why()
-    local ctx = Harness.Load({ apiMinor = 5 })
+function T.an_easyfind_before_minor_7_registers_nothing_and_says_why()
+    local ctx = Harness.Load({ apiMinor = 6 })
     Eq(ctx.extension, nil, "extension")
     Eq(ctx.provider, nil, "provider")
     Eq(ctx.decorator, nil, "decorator")

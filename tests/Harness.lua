@@ -43,7 +43,7 @@ function Harness.Toc()
     return fields, files
 end
 
--- EasyFind's field types (Core/API.lua, MINOR 6): anything else passed is
+-- EasyFind's field types (Core/API.lua, MINOR 7): anything else passed is
 -- an unknown field, a wrong type a load error there.
 Harness.EXTENSION_FIELDS = {
     id = "string", name = "string", description = "string", icon = "texture", iconCoords = "table",
@@ -63,7 +63,7 @@ Harness.DECORATOR_FIELDS = {
     id = "string", extension = "string", slot = "string", label = "string", applies = "function",
     categories = "table", text = "function", tooltip = "function", menu = "function", submenu = "boolean",
     subtext = "function", select = "function", hint = "function", keep = "function", sortKey = "function",
-    aliases = "table", browse = "function", candidates = "function",
+    aliases = "table", browse = "function", candidates = "function", words = "function",
 }
 
 -- Unknown fields and wrong types in a registration, as one string.
@@ -422,14 +422,33 @@ function Harness.Rows(ctx)
 end
 
 -- EasyFind's rule for a query of several words (Database:ScoreEntryFields):
--- each word of two letters or more starts a word of the row's name or of
--- one of its keywords.
+-- each word of two letters or more starts a word of the row's name, of
+-- one of its keywords, or of its place's words.
+-- A row with a numeric mapID also answers to its place (MINOR 7): its map,
+-- the maps above it up to the continent, and a two-word continent's
+-- initials ("ek").
+local function PlaceWords(mapID, out)
+    local id = mapID
+    while MAPS[id] and MAPS[id].type >= 2 do
+        local name = MAPS[id].name:lower()
+        for w in name:gmatch("%S+") do out[#out + 1] = w end
+        if MAPS[id].type == 2 then
+            local initials, n = "", 0
+            for w in name:gmatch("%S+") do initials, n = initials .. w:sub(1, 1), n + 1 end
+            if n >= 2 then out[#out + 1] = initials end
+            break
+        end
+        id = MAPS[id].parent
+    end
+end
+
 function Harness.Matches(row, query)
     local words = {}
     for w in row.name:lower():gmatch("%S+") do words[#words + 1] = w end
     for _, kw in ipairs(row.keywords or {}) do
         for w in kw:lower():gmatch("%S+") do words[#words + 1] = w end
     end
+    if type(row.mapID) == "number" then PlaceWords(row.mapID, words) end
     for q in query:lower():gmatch("%S+") do
         if #q >= 2 then
             local hit = false
