@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.1] - 2026-11-05
+
+- With many HandyNotes plugins installed, reading their pins no longer stops with a "script ran too long" error; the pins are read a little at a time instead.
+
 ## [1.0.0] - 2026-11-03
 
 - Find what your HandyNotes plugins mark on the map from EasyFind's search bar: treasures, rares, vendors and more, by name and with no `@` needed.
