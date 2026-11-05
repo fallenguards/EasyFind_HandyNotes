@@ -169,6 +169,8 @@ local function Game(ctx, client)
     env.CreateFrame = function(kind, name) return NewFrame(ctx, kind, name) end
     env.CreateVector2D = function(x, y) return { x = x, y = y } end
     env.GetTime = function() return ctx.now end
+    -- msPerRead: what each read costs, for a walk that stops on time
+    env.debugprofilestop = function() ctx.ms = ctx.ms + (ctx.msPerRead or 0) return ctx.ms end
     env.IsShiftKeyDown = function() return w.shift end
     env.hooksecurefunc = Hooksecurefunc
     env.wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
@@ -354,7 +356,7 @@ end
 function Harness.Load(opts)
     opts = opts or {}
     local ctx = {
-        now = 0, timers = {}, frames = {}, printed = {}, errors = {}, linked = {}, waypoints = {}, requested = {},
+        now = 0, ms = 0, ran = 0, timers = {}, frames = {}, printed = {}, errors = {}, linked = {}, waypoints = {}, requested = {},
         api = { refreshes = {}, actions = {}, repaints = 0, asked = 0 }, listed = {}, creatures = {},
         world = { map = 1, shift = false, gps = opts.gps == true },
         npcs = {}, items = {}, spells = {}, quests = {}, questsDone = {}, factions = {}, currencies = {},
@@ -409,6 +411,7 @@ function Harness.Advance(ctx, seconds)
             end
         end
         if not due then return end
+        ctx.ran = ctx.ran + 1
         table.remove(ctx.timers, due).fn()
     end
     error("timers never settle")

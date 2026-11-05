@@ -22,7 +22,7 @@ read_globals = {
     "GetAchievementCriteriaInfo", "GetAchievementCriteriaInfoByID", "GetAchievementInfo", "GetFactionInfoByID",
     "GetTime", "IsShiftKeyDown", "issecretvalue",
     "MAP_PIN_HYPERLINK", "UNKNOWNOBJECT",
-    "debugstack", "geterrorhandler", "hooksecurefunc", "wipe",
+    "debugprofilestop", "debugstack", "geterrorhandler", "hooksecurefunc", "wipe",
 }
 
 -- WoW callbacks have fixed signatures; unused args are normal

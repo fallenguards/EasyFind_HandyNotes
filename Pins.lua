@@ -23,7 +23,7 @@ end
 local KEY = "handynotes"
 local ICON = "Interface\\AddOns\\EasyFind_HandyNotes\\map"
 local COSMIC, AZEROTH = 946, 947
-local MAPS_PER_FRAME = 60
+local WALK_MS = 4                          -- each frame's share of the pin walk
 local RESOLVE_WAIT, RESOLVE_TRIES = 2, 3   -- names the server has not sent yet
 local REWALK_WAIT = 3                      -- after a plugin says its pins changed
 local LOGIN_WALK_WAIT = 3                  -- after login's own loading
@@ -35,7 +35,7 @@ local KIND_MAX = 40   -- longer text is a note, not a kind
 
 local C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns =
       C_Map, C_Item, C_QuestLog, C_Spell, C_CurrencyInfo, C_Timer, C_AddOns
-local IsShiftKeyDown, CreateVector2D, GetTime = IsShiftKeyDown, CreateVector2D, GetTime
+local IsShiftKeyDown, CreateVector2D, GetTime, debugprofilestop = IsShiftKeyDown, CreateVector2D, GetTime, debugprofilestop
 local sformat, tsort, floor, wipe = string.format, table.sort, math.floor, wipe
 local issecretvalue = issecretvalue or function(_) return false end
 -- Era, TBC and Mists: the classic quest title and faction calls, an NPC's
@@ -530,7 +530,8 @@ local function Finish(fresh)
     if H.all or next(H.dirty) then StartWalk() end
 end
 
--- Walks every map for the plugins that need it, a few maps per frame.
+-- Walks every map for the plugins that need it, one plugin's map at a
+-- time until the frame's share is spent (81 plugins ran too long at 60 maps).
 StartWalk = function()
     if H.walking or not H.ready then return end
     local HN = H.hn
@@ -552,17 +553,16 @@ StartWalk = function()
         return
     end
     H.walking = true
-    local maps, at = MapList(), 0
+    local maps, m, p = MapList(), 1, 1
     local function Step()
-        local stop = math.min(at + MAPS_PER_FRAME, #maps)
-        for m = at + 1, stop do
-            for i = 1, #plugins do
-                local name = plugins[i]
-                xpcall(WalkMap, ErrorHandler, name, HN.plugins[name], maps[m], fresh[name])
-            end
-        end
-        at = stop
-        if at < #maps then
+        local deadline = debugprofilestop() + WALK_MS
+        repeat
+            local name = plugins[p]
+            xpcall(WalkMap, ErrorHandler, name, HN.plugins[name], maps[m], fresh[name])
+            p = p + 1
+            if p > #plugins then p, m = 1, m + 1 end
+        until m > #maps or debugprofilestop() >= deadline
+        if m <= #maps then
             C_Timer.After(0, Step)
         else
             Finish(fresh)

@@ -51,6 +51,39 @@ function T.rows_are_every_plugins_pins_by_name()
     Eq(#ctx.errors, 0, "errors")
 end
 
+-- 81 plugins (a player's "script ran too long", 2026-11-05: 60 maps of
+-- all 81 in one frame): a frame walks until its share of time is spent.
+function T.the_walk_stops_each_frame_when_its_time_is_spent()
+    local plugins, addons = {}, {}
+    for i = 1, 81 do
+        plugins["P" .. i] = Treasures()
+        addons["HandyNotes_P" .. i] = { Title = "HandyNotes: P" .. i }
+    end
+    local ctx = Load({ plugins = plugins, addons = addons })
+    ctx.msPerRead = 1
+    local perFrame = {}
+    for _, handler in pairs(plugins) do
+        local read = handler.GetNodes2
+        function handler:GetNodes2(...)
+            perFrame[ctx.ran] = (perFrame[ctx.ran] or 0) + 1
+            return read(self, ...)
+        end
+    end
+    local rows = Harness.Rows(ctx)
+    local most, frames = 0, 0
+    for _, n in pairs(perFrame) do
+        most, frames = math.max(most, n), frames + 1
+    end
+    True(most <= 4, "at most 4 plugin maps a frame, saw " .. most)
+    True(frames > 1, "the walk spans frames")
+    local chests = 0
+    for _, row in ipairs(rows) do
+        if row.name == "Sunken Chest" then chests = chests + 1 end
+    end
+    Eq(chests, 81, "every plugin's pins still found")
+    Eq(#ctx.errors, 0, "errors")
+end
+
 function T.the_walk_reaches_maps_under_azeroth_when_cosmic_lists_none()
     local ctx = Load()
     ctx.world.noCosmicChildren = true
