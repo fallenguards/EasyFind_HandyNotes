@@ -232,6 +232,9 @@ local function Game(ctx, client)
 
     if client == "retail" then
         env.issecretvalue = function() return false end
+        -- world.lockdown: a chat lockdown (an encounter, a key, a match)
+        env.C_ChatInfo = { InChatMessagingLockdown = function() return w.lockdown == true end }
+        env.C_EventUtils = { IsEventValid = function(e) return e == "ADDON_RESTRICTION_STATE_CHANGED" end }
         env.C_TooltipInfo = { GetHyperlink = function(link)
             local id = tonumber(link:match("^unit:Creature%-0%-0%-0%-0%-(%d+)"))
             local name = id and ctx.npcs[id]

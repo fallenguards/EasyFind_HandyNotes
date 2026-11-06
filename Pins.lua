@@ -45,11 +45,16 @@ local RequestQuest = C_QuestLog.RequestLoadQuestByID
 local FactionData = C_Reputation and C_Reputation.GetFactionDataByID
 local TooltipLink = C_TooltipInfo and C_TooltipInfo.GetHyperlink
 local WAYPOINTS = C_Map.SetUserWaypoint ~= nil and C_SuperTrack ~= nil
+-- In a chat lockdown plugins read the calendar and more as secrets.
+local InLockdown = C_ChatInfo and C_ChatInfo.InChatMessagingLockdown or function() return false end
+local RESTRICTION = "ADDON_RESTRICTION_STATE_CHANGED"
+local RESTRICTION_EVENT = C_EventUtils and C_EventUtils.IsEventValid and C_EventUtils.IsEventValid(RESTRICTION)
 
 -- Module state: HandyNotes once bound, the map list, per plugin its own
 -- rows and the pins EasyFind lists, what to walk again.
 local H = { ready = false, index = {}, lookup = {}, decor = {}, titles = {}, zones = {}, zoneOf = {}, npcs = {},
             dirty = {}, all = true, gens = {} }
+local events = CreateFrame("Frame")
 
 local function DB()
     EasyFindHandyNotesDB = EasyFindHandyNotesDB or {}
@@ -414,13 +419,14 @@ end
 
 -- One plugin's pins on one map through HandyNotes' own iterator, so its
 -- settings apply; the iterator's state holds the node behind each coord.
+-- A plugin's own error ends its map, never reported in our name.
 local function WalkMap(plugin, handler, mapID, out)
-    local iter, state, init = handler:GetNodes2(mapID, false)
-    if type(iter) ~= "function" then return end
+    local ok, iter, state, init = pcall(handler.GetNodes2, handler, mapID, false)
+    if not ok or type(iter) ~= "function" then return end
     local prev = init
     while true do
-        local coord, mapID2, iconpath = iter(state, prev)
-        if coord == nil then break end
+        local fine, coord, mapID2, iconpath = pcall(iter, state, prev)
+        if not fine or coord == nil then break end
         prev = coord
         -- A zone's pin shown on its continent is indexed from the zone.
         if not (mapID2 and mapID2 ~= mapID) and type(state) == "table" then
@@ -530,10 +536,25 @@ local function Finish(fresh)
     if H.all or next(H.dirty) then StartWalk() end
 end
 
+-- A walk held by a chat lockdown goes on once it lifts.
+local function Hold(fn)
+    H.held = fn
+    if RESTRICTION_EVENT then events:RegisterEvent(RESTRICTION) end
+end
+
+local function Resume()
+    local held = H.held
+    if not held or InLockdown() then return end
+    H.held = nil
+    if RESTRICTION_EVENT then events:UnregisterEvent(RESTRICTION) end
+    C_Timer.After(0, held)
+end
+
 -- Walks every map for the plugins that need it, one plugin's map at a
 -- time until the frame's share is spent (81 plugins ran too long at 60 maps).
 StartWalk = function()
     if H.walking or not H.ready then return end
+    if InLockdown() then return Hold(StartWalk) end
     local HN = H.hn
     local plugins, fresh = {}, {}
     for name, handler in pairs(HN.plugins) do
@@ -555,6 +576,7 @@ StartWalk = function()
     H.walking = true
     local maps, m, p = MapList(), 1, 1
     local function Step()
+        if InLockdown() then return Hold(Step) end
         local deadline = debugprofilestop() + WALK_MS
         repeat
             local name = plugins[p]
@@ -626,6 +648,7 @@ end
 
 local function Rows()
     if not H.ready or not HandyNotesOn() then return {} end
+    Resume()
     if not H.walked then StartWalk() end
     local db = DB()
     local here = db.nearMe and C_Map.GetBestMapForUnit("player") or nil
@@ -807,8 +830,6 @@ end
 
 -- ==== registration =========================================================
 
-local events = CreateFrame("Frame")
-
 local function WatchZone()
     if DB().nearMe then events:RegisterEvent("ZONE_CHANGED_NEW_AREA") else events:UnregisterEvent("ZONE_CHANGED_NEW_AREA") end
 end
@@ -944,6 +965,8 @@ events:SetScript("OnEvent", function(_, event)
         C_Timer.After(LOGIN_WALK_WAIT, function()
             if not H.walked then StartWalk() end
         end)
+    elseif event == RESTRICTION then
+        Resume()
     else
         Refresh()
     end

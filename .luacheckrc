@@ -15,7 +15,7 @@ globals = {
 -- WoW API and the addons it reads (read-only)
 read_globals = {
     "EasyFind",
-    "C_AddOns", "C_CurrencyInfo", "C_Item", "C_Map", "C_PetJournal", "C_QuestLog", "C_Reputation", "C_Spell",
+    "C_AddOns", "C_ChatInfo", "C_CurrencyInfo", "C_EventUtils", "C_Item", "C_Map", "C_PetJournal", "C_QuestLog", "C_Reputation", "C_Spell",
     "C_SuperTrack", "C_Timer", "C_TooltipInfo", "IsAddOnLoaded",
     "ChatEdit_GetActiveWindow", "ChatEdit_InsertLink", "ChatFrame_OpenChat",
     "CreateFrame", "CreateVector2D", "Enum", "LibStub", "UiMapPoint", "WorldFrame", "WorldMapFrame",

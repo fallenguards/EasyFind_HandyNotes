@@ -84,6 +84,93 @@ function T.the_walk_stops_each_frame_when_its_time_is_spent()
     Eq(#ctx.errors, 0, "errors")
 end
 
+-- A plugin whose pin check throws, as a calendar check on a secret does.
+local function Broken()
+    local handler = Treasures()
+    local read = handler.GetNodes2
+    function handler:GetNodes2(mapID, ...)
+        local iter, state, init = read(self, mapID, ...)
+        if mapID ~= DUROTAR then return iter, state, init end
+        return function() error("attempt to compare field 'calendarType' (a secret string value)") end, state, init
+    end
+    return handler
+end
+
+-- The walk reads every map once: all of the stand-in world's.
+local MAP_COUNT = 0
+for _ in pairs(Harness.MAPS) do MAP_COUNT = MAP_COUNT + 1 end
+
+local function RestrictionListened(ctx)
+    for _, f in ipairs(ctx.frames) do
+        if f.events.ADDON_RESTRICTION_STATE_CHANGED then return true end
+    end
+    return false
+end
+
+function T.a_plugins_own_error_is_never_reported_as_ours()
+    local ctx = Load({ plugins = { Treasures = Treasures(), Broken = Broken() } })
+    local rows = Harness.Rows(ctx)
+    Eq(#ctx.errors, 0, "errors in our name")
+    local chests, fel = 0, 0
+    for _, row in ipairs(rows) do
+        if row.name == "Sunken Chest" then chests = chests + 1 end
+        if row.name == "Fel Chest" then fel = fel + 1 end
+    end
+    Eq(chests, 1, "the other plugin's Durotar pin")
+    Eq(fel, 2, "the broken plugin's pins on its other maps")
+end
+
+function T.the_walk_waits_out_a_chat_lockdown()
+    local handler = Treasures()
+    local ctx = Load({ plugins = { Treasures = handler }, login = false })
+    ctx.Fire("PLAYER_LOGIN")
+    ctx.world.lockdown = true
+    ctx.Advance(3)
+    Eq(handler.calls, 0, "no plugin read in a lockdown")
+    True(RestrictionListened(ctx), "listens for the lockdown's end")
+    Eq(#ctx.provider.rows(), 0, "a search in the lockdown")
+    Eq(handler.calls, 0, "a search starts no walk in a lockdown")
+    ctx.world.lockdown = false
+    ctx.Fire("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
+    ctx.Advance(0)
+    True(Row(ctx.provider.rows(), "Sunken Chest") ~= nil, "walked once it lifted")
+    True(not RestrictionListened(ctx), "stops listening")
+end
+
+function T.a_lockdown_mid_walk_holds_the_rest_until_it_lifts()
+    local handler = Treasures()
+    local ctx = Load({ plugins = { Treasures = handler } })
+    ctx.msPerRead = 1
+    local read, atLock = handler.GetNodes2, nil
+    function handler:GetNodes2(...)
+        if self.calls == 2 then ctx.world.lockdown, atLock = true, ctx.ran end
+        return read(self, ...)
+    end
+    ctx.Advance(3)
+    local held = handler.calls
+    True(atLock ~= nil and held < MAP_COUNT, "held part way, read " .. held)
+    ctx.Advance(10)
+    Eq(handler.calls, held, "nothing read while it lasts")
+    ctx.world.lockdown = false
+    ctx.Fire("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
+    ctx.Advance(0)
+    Eq(handler.calls, MAP_COUNT, "each map read once")
+    local rows = ctx.provider.rows()
+    for _, name in ipairs({ "Sunken Chest", "Old Crate", "Gruk the Hoarder", "Ragefire Cache", "Fel Chest" }) do
+        True(Row(rows, name) ~= nil, name .. " listed")
+    end
+    Eq(#ctx.errors, 0, "errors")
+end
+
+function T.a_search_resumes_a_held_walk_when_no_event_came()
+    local handler = Treasures()
+    local ctx = Load({ plugins = { Treasures = handler } })
+    ctx.world.lockdown = true
+    ctx.Advance(3)
+    ctx.world.lockdown = false
+    True(Row(Harness.Rows(ctx), "Sunken Chest") ~= nil, "walked from the search")
+end
+
 function T.the_walk_reaches_maps_under_azeroth_when_cosmic_lists_none()
     local ctx = Load()
     ctx.world.noCosmicChildren = true
