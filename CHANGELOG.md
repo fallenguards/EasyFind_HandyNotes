@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.2] - 2026-11-05
+
+- Pins are no longer read during a boss fight, a Mythic+ key or a PvP match, where some HandyNotes plugins raise errors; they are read once it ends.
+- An error inside a HandyNotes plugin no longer shows up as an error from this extension.
+
 ## [1.0.1] - 2026-11-05
 
 - With many HandyNotes plugins installed, reading their pins no longer stops with a "script ran too long" error; the pins are read a little at a time instead.
