@@ -514,26 +514,39 @@ local function Resolve(pending, try)
     end)
 end
 
+-- The walk's pins into the index, the frame's share at a time (1,800 pins
+-- at once held a retail frame 145 ms).
 local function Finish(fresh)
-    H.walking = false
-    local pending = {}
-    for plugin, entries in pairs(fresh) do
-        Drop(plugin)
-        for i = 1, #entries do
-            local e = entries[i]
-            -- A creature EasyFind has needs no name of ours: its row has one.
-            if e.npcID and API.HasCreature(e.npcID) then
-                Add(e)
-            elseif e.unresolved then
-                pending[#pending + 1] = e
-            elseif e.name then
-                Add(e)
+    local pending, plugins = {}, {}
+    for plugin in pairs(fresh) do plugins[#plugins + 1] = plugin end
+    local p, i = 1, 1
+    local function Step()
+        local deadline = debugprofilestop() + WALK_MS
+        while p <= #plugins do
+            local plugin = plugins[p]
+            local entries = fresh[plugin]
+            if i == 1 then Drop(plugin) end
+            while i <= #entries do
+                local e = entries[i]
+                i = i + 1
+                -- A creature EasyFind has needs no name of ours: its row has one.
+                if e.npcID and API.HasCreature(e.npcID) then
+                    Add(e)
+                elseif e.unresolved then
+                    pending[#pending + 1] = e
+                elseif e.name then
+                    Add(e)
+                end
+                if debugprofilestop() >= deadline then return C_Timer.After(0, Step) end
             end
+            p, i = p + 1, 1
         end
+        H.walking = false
+        if #pending > 0 then Resolve(pending, 1) end
+        Refresh()
+        if H.all or next(H.dirty) then StartWalk() end
     end
-    if #pending > 0 then Resolve(pending, 1) end
-    Refresh()
-    if H.all or next(H.dirty) then StartWalk() end
+    Step()
 end
 
 -- A walk held by a chat lockdown goes on once it lifts.
@@ -616,7 +629,16 @@ local function SpotKey(e)
     return e.plugin .. "\0" .. e.name .. "\0" .. e.ci .. "\0" .. floor(e.wx / 5) .. "\0" .. floor(e.wy / 5)
 end
 
-local function ByName(a, b) return a.name < b.name end
+-- Pins of one name keep one order (EasyFind's saved index matches it).
+local function ByName(a, b)
+    if a.name ~= b.name then return a.name < b.name end
+    if a.plugin ~= b.plugin then return a.plugin < b.plugin end
+    if a.mapID ~= b.mapID then return (a.mapID or 0) < (b.mapID or 0) end
+    return (a.coord or 0) < (b.coord or 0)
+end
+
+-- EasyFind 5.4.0 on: the frame goes while the rows are built.
+local Checkpoint = API and API.SliceCheckpoint or function() end
 
 -- What a pin is and drops, as words the search matches with its name:
 -- its plugin ("decor vendors"), its own kind, its loot. EasyFind adds its
@@ -655,6 +677,7 @@ local function Rows()
     local out, seen = {}, {}
     for plugin, entries in pairs(H.index) do
         for i = 1, #entries do
+            if i % 64 == 0 then Checkpoint() end
             local e = entries[i]
             local keep = not (db.hideDone and e.done)
             if keep and here then keep = e.mapID == here end
