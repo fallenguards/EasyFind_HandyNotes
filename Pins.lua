@@ -95,7 +95,7 @@ local function NpcName(id)
     local name = H.npcs[id]
     if name then return name end
     name = TooltipTitle("unit:Creature-0-0-0-0-" .. id)
-    if name == nil or issecretvalue(name) then return nil end
+    if issecretvalue(name) or name == nil then return nil end
     if type(name) ~= "string" or name == "" or name == UNKNOWNOBJECT then return nil end
     H.npcs[id] = name
     return name
