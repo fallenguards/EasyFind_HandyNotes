@@ -419,8 +419,10 @@ end
 
 -- One plugin's pins on one map through HandyNotes' own iterator, so its
 -- settings apply; the iterator's state holds the node behind each coord.
--- A plugin's own error ends its map, never reported in our name.
+-- A plugin's own error ends its map, never reported in our name; one gone
+-- from HandyNotes since the walk began has no map left.
 local function WalkMap(plugin, handler, mapID, out)
+    if type(handler) ~= "table" or type(handler.GetNodes2) ~= "function" then return end
     local ok, iter, state, init = pcall(handler.GetNodes2, handler, mapID, false)
     if not ok or type(iter) ~= "function" then return end
     local prev = init

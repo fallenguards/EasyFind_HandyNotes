@@ -137,6 +137,25 @@ function T.the_walk_waits_out_a_chat_lockdown()
     True(not RestrictionListened(ctx), "stops listening")
 end
 
+-- A plugin gone from HandyNotes between two of the walk's frames (its
+-- addon turned off, one that unregisters itself) is skipped: the walk read
+-- it as a nil handler (retail 12.1.5, Pins.lua:424 "attempt to index local
+-- 'handler'").
+function T.a_plugin_gone_mid_walk_is_skipped()
+    local handler = Treasures()
+    local rares = Harness.Plugin({ [DUROTAR] = { [Coord(0.1, 0.1)] = { label = "Rare" } } })
+    local ctx = Load({ plugins = { Treasures = handler, Rares = rares } })
+    ctx.msPerRead = 1
+    local read = handler.GetNodes2
+    function handler:GetNodes2(...)
+        ctx.hn.plugins.Rares = nil
+        return read(self, ...)
+    end
+    ctx.Advance(3)
+    Eq(#ctx.errors, 0, "errors")
+    True(Row(ctx.provider.rows(), "Sunken Chest") ~= nil, "the rest walked")
+end
+
 function T.a_lockdown_mid_walk_holds_the_rest_until_it_lifts()
     local handler = Treasures()
     local ctx = Load({ plugins = { Treasures = handler } })
