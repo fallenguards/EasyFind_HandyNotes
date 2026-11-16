@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.3] - 2026-11-16
+
+- Fixed an error ("attempt to index local 'handler'") when a HandyNotes plugin was turned off or removed itself while its pins were being read.
+- Fixed a possible error when the game hides a creature's name.
+- With many HandyNotes plugins, finishing reading their pins no longer holds up the game for a moment, and pins sharing a name always list in the same order.
+
 ## [1.0.2] - 2026-11-05
 
 - Pins are no longer read during a boss fight, a Mythic+ key or a PvP match, where some HandyNotes plugins raise errors; they are read once it ends.
