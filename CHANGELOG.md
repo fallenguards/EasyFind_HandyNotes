@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.4] - 2026-11-23
+
+- Marked up to date for WoW 12.1.7, so the game no longer lists it as out of date there.
+
 ## [1.0.3] - 2026-11-16
 
 - Fixed an error ("attempt to index local 'handler'") when a HandyNotes plugin was turned off or removed itself while its pins were being read.
